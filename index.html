@@ -1344,6 +1344,48 @@
         .install-guide-box .step-text b { color: #1a73e8; }
         .install-guide-box .guide-close-btn { display: block; width: 100%; padding: 0.7rem; background: #1a73e8; color: #fff; border: none; border-radius: 10px; font-size: 0.9rem; font-weight: 600; margin-top: 1rem; cursor: pointer; }
         .install-guide-box .install-now-btn { display: block; width: 100%; padding: 0.6rem; background: #fff; color: #1a73e8; border: 2px solid #1a73e8; border-radius: 10px; font-size: 0.85rem; font-weight: 600; margin-top: 0.5rem; cursor: pointer; }
+        /* ===== 手势返回 ===== */
+        .swipe-back-indicator {
+            position: fixed;
+            top: 50%;
+            left: 0;
+            transform: translate(-100%, -50%);
+            width: 3rem;
+            height: 3rem;
+            background: rgba(60,120,100,0.85);
+            border-radius: 0 50% 50% 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        .swipe-back-indicator.right {
+            left: auto;
+            right: 0;
+            transform: translate(100%, -50%);
+            border-radius: 50% 0 0 50%;
+        }
+        .swipe-back-indicator.show {
+            opacity: 1;
+        }
+        .swipe-back-indicator.active {
+            background: rgba(60,120,100,1);
+        }
+        .swipe-back-indicator .swipe-back-arrow {
+            color: white;
+            font-size: 1.8rem;
+            font-weight: 300;
+            line-height: 1;
+            margin-left: 0.3rem;
+        }
+        .swipe-back-indicator.right .swipe-back-arrow {
+            margin-left: 0;
+            margin-right: 0.3rem;
+            transform: scaleX(-1);
+        }
     </style>
 </head>
 <body>
@@ -2136,33 +2178,70 @@ function recalcDiseaseCounts(entityId) {
                 }
             }
             // 手机版 PWA 种子数据初始化：从 seed-data.json 加载
+            // 逻辑：每次打开都检查版本，如果服务器上的数据更新，就自动覆盖本地数据
             if (!window.electronAPI || !window.electronAPI.isElectron) {
-                return fetch('./seed-data.json').then(function(res) {
+                return fetch('./seed-data.json?_=' + Date.now(), { cache: 'no-store' }).then(function(res) {
                     if (!res.ok) return null;
                     return res.json();
                 }).then(function(seedJson) {
                     if (seedJson && seedJson.data) {
                         return new Promise(function(resolve) {
-                            var checkTx = db.transaction('stations', 'readonly');
-                            var checkReq = checkTx.objectStore('stations').count();
-                            checkReq.onsuccess = function() {
-                                if (checkReq.result === 0) {
+                            // 读取本地保存的种子数据版本
+                            var metaTx = db.transaction('appMeta', 'readonly');
+                            var metaReq = metaTx.objectStore('appMeta').get('seedDataVersion');
+                            metaReq.onsuccess = function() {
+                                var localVersion = metaReq.result ? metaReq.result.data : null;
+                                var serverVersion = seedJson.exportDate || seedJson.version || null;
+                                
+                                // 版本判断：本地没有版本（首次使用）或服务器版本更新 → 导入
+                                var shouldImport = !localVersion || (serverVersion && serverVersion !== localVersion);
+                                
+                                if (shouldImport) {
+                                    // 先清空旧数据
                                     var stores = ['appMeta', 'stations', 'devices', 'subStructures', 'issues', 'photos', 'photoThumbs', 'photoFulls', 'blocks'];
-                                    var remaining = stores.length;
-                                    if (remaining === 0) { resolve(); return; }
+                                    var clearRemaining = stores.length;
                                     stores.forEach(function(storeName) {
                                         try {
-                                            var tx2 = db.transaction(storeName, 'readwrite');
-                                            var store2 = tx2.objectStore(storeName);
-                                            var items = seedJson.data[storeName] || [];
-                                            items.forEach(function(item) { store2.put(item); });
-                                            tx2.oncomplete = function() { if (--remaining === 0) resolve(); };
-                                            tx2.onerror = function() { if (--remaining === 0) resolve(); };
-                                        } catch(err) { if (--remaining === 0) resolve(); }
+                                            var clearTx = db.transaction(storeName, 'readwrite');
+                                            var clearReq = clearTx.objectStore(storeName).clear();
+                                            clearReq.onsuccess = function() { if (--clearRemaining === 0) doImport(); };
+                                            clearReq.onerror = function() { if (--clearRemaining === 0) doImport(); };
+                                        } catch(err) { if (--clearRemaining === 0) doImport(); }
                                     });
-                                } else { resolve(); }
+                                    
+                                    function doImport() {
+                                        var importRemaining = stores.length;
+                                        stores.forEach(function(storeName) {
+                                            try {
+                                                var tx2 = db.transaction(storeName, 'readwrite');
+                                                var store2 = tx2.objectStore(storeName);
+                                                var items = seedJson.data[storeName] || [];
+                                                items.forEach(function(item) { store2.put(item); });
+                                                tx2.oncomplete = function() { if (--importRemaining === 0) saveVersion(); };
+                                                tx2.onerror = function() { if (--importRemaining === 0) saveVersion(); };
+                                            } catch(err) { if (--importRemaining === 0) saveVersion(); }
+                                        });
+                                    }
+                                    
+                                    function saveVersion() {
+                                        // 保存版本标记
+                                        try {
+                                            var vTx = db.transaction('appMeta', 'readwrite');
+                                            vTx.objectStore('appMeta').put({ key: 'seedDataVersion', data: serverVersion });
+                                            vTx.oncomplete = function() { 
+                                                if (localVersion) {
+                                                    showToast('📥 数据已更新到最新版本');
+                                                }
+                                                resolve(); 
+                                            };
+                                            vTx.onerror = function() { resolve(); };
+                                        } catch(err) { resolve(); }
+                                    }
+                                } else {
+                                    resolve();
+                                }
                             };
-                            checkReq.onerror = function() { resolve(); };
+                            metaReq.onerror = function() { resolve(); };
                         });
                     }
                 }).catch(function() { /* seed-data.json 不存在或格式错误，跳过 */ });
@@ -3696,6 +3775,136 @@ function recalcDiseaseCounts(entityId) {
     let currentStationId = null;
 
     // ----- 首页 -----
+    // ===== 手势返回 =====
+    (function initSwipeBack() {
+        var indicator = document.getElementById('swipeBackIndicator');
+        var EDGE_WIDTH = 25;       // 边缘触发区域宽度（px）
+        var MIN_DISTANCE = 70;     // 触发返回的最小滑动距离
+        var MAX_VERTICAL = 50;     // 允许的最大纵向偏移
+        var startX = 0, startY = 0;
+        var isSwipe = false;
+        var swipeSide = null;      // 'left' 或 'right'
+        var startTime = 0;
+
+        function canGoBack() {
+            // 有弹窗打开时不触发
+            var modals = document.querySelectorAll('.modal.active');
+            for (var i = 0; i < modals.length; i++) {
+                if (modals[i].style.display !== 'none') return false;
+            }
+            // 首页不返回
+            if (currentView === 'home') return false;
+            return true;
+        }
+
+        function doSwipeBack() {
+            if (currentView === 'substruct') {
+                // 附属构筑物 → 返回主设备
+                var ss = currentSubStructId ? getSubStructure(currentSubStructId) : null;
+                if (ss && ss.parentDeviceId) {
+                    currentSubStructId = null;
+                    openDevice(ss.parentDeviceId);
+                } else {
+                    goHome();
+                }
+            } else if (currentView === 'device') {
+                goBackFromDevice();
+            } else if (currentView === 'block') {
+                goBackFromBlock();
+            } else if (currentView === 'station') {
+                goHome();
+            }
+        }
+
+        document.addEventListener('touchstart', function(e) {
+            if (!canGoBack()) return;
+            if (e.touches.length !== 1) return;
+            var touch = e.touches[0];
+            var w = window.innerWidth;
+            startX = touch.clientX;
+            startY = touch.clientY;
+            startTime = Date.now();
+            isSwipe = false;
+            swipeSide = null;
+
+            if (startX <= EDGE_WIDTH) {
+                swipeSide = 'left';
+                isSwipe = true;
+            } else if (startX >= w - EDGE_WIDTH) {
+                swipeSide = 'right';
+                isSwipe = true;
+            }
+        }, { passive: true });
+
+        document.addEventListener('touchmove', function(e) {
+            if (!isSwipe || !swipeSide) return;
+            if (e.touches.length !== 1) return;
+            var touch = e.touches[0];
+            var dx = touch.clientX - startX;
+            var dy = Math.abs(touch.clientY - startY);
+
+            // 纵向偏移太大，取消
+            if (dy > MAX_VERTICAL) {
+                isSwipe = false;
+                indicator.classList.remove('show', 'active', 'right');
+                indicator.style.transform = '';
+                return;
+            }
+
+            // 方向判断
+            if (swipeSide === 'left' && dx < 0) { isSwipe = false; indicator.classList.remove('show', 'active'); return; }
+            if (swipeSide === 'right' && dx > 0) { isSwipe = false; indicator.classList.remove('show', 'active', 'right'); return; }
+
+            var absDx = Math.abs(dx);
+            var progress = Math.min(absDx / MIN_DISTANCE, 1);
+
+            // 显示指示器
+            if (swipeSide === 'right') {
+                indicator.classList.add('right');
+            } else {
+                indicator.classList.remove('right');
+            }
+            indicator.classList.add('show');
+
+            // 指示器跟随手指
+            var offset = Math.min(absDx * 0.5, 50);
+            if (swipeSide === 'left') {
+                indicator.style.transform = 'translate(' + (-100 + progress * 60) + '%, -50%)';
+            } else {
+                indicator.style.transform = 'translate(' + (100 - progress * 60) + '%, -50%)';
+            }
+
+            // 达到阈值时高亮
+            if (progress >= 1) {
+                indicator.classList.add('active');
+            } else {
+                indicator.classList.remove('active');
+            }
+        }, { passive: true });
+
+        document.addEventListener('touchend', function(e) {
+            if (!isSwipe || !swipeSide) return;
+            var touch = e.changedTouches[0];
+            var dx = touch.clientX - startX;
+            var absDx = Math.abs(dx);
+            var dy = Math.abs(touch.clientY - startY);
+
+            isSwipe = false;
+            indicator.classList.remove('show', 'active', 'right');
+            indicator.style.transform = '';
+
+            if (dy > MAX_VERTICAL) return;
+            if (absDx < MIN_DISTANCE) return;
+
+            // 方向确认
+            if (swipeSide === 'left' && dx <= 0) return;
+            if (swipeSide === 'right' && dx >= 0) return;
+
+            // 触发返回
+            doSwipeBack();
+        }, { passive: true });
+    })();
+
     function goHome() {
         currentView = 'home';
         currentDeviceId = null;
@@ -4626,6 +4835,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
     function openSubStructure(ssId) {
         currentSubStructId = ssId;
         currentDeviceId = ssId; // 复用现有函数：issues/photos存储都按ID，不区分设备/附属构筑物
+        currentView = 'substruct';
         renderSubStructureDetail(ssId);
     }
 
@@ -5482,7 +5692,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
     function openBlock(blockId) {
         var block = getBlockById(blockId);
         if (!block) { alert('块不存在'); return; }
-        currentView = 'station';
+        currentView = 'block';
         currentBlockId = blockId;
         currentBlockName = block.name;
         currentBlockDepth = getBlockDepth(blockId);
@@ -6247,6 +6457,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
     function openDevice(deviceId) {
         currentDeviceId = deviceId;
         currentSubStructId = null;
+        currentView = 'device';
         renderDeviceDetail(deviceId);
     }
 
@@ -7414,6 +7625,11 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                 <button class="btn" id="issueLibConfirmBtn" onclick="submitIssueLibraryImport()" style="display:none;">确认导入</button>
             </div>
         </div>
+    </div>
+
+    <!-- 手势返回指示器 -->
+    <div id="swipeBackIndicator" class="swipe-back-indicator">
+        <div class="swipe-back-arrow">‹</div>
     </div>
 
 </body>
