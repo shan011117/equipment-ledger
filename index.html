@@ -30,6 +30,7 @@
         .app { max-width: 1200px; margin: 0 auto; }
 
         .topbar {
+            position: relative;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -59,6 +60,32 @@
             transition: background 0.2s;
         }
         .topbar .data-btn:hover { background: #dcebe4; }
+
+        /* ===== 查看模式 ===== */
+        .view-only-mode .topbar .data-btn { display: none !important; }
+        .view-only-mode .tab-del { display: none !important; }
+        .view-only-mode .tab-add-btn { display: none !important; }
+        .view-only-mode .card-del-btn { display: none !important; }
+        .view-only-mode .card-rename-btn { display: none !important; }
+        .view-only-mode .view-hide { display: none !important; }
+        .view-only-mode .breadcrumb { display: none !important; }
+
+        /* 左上角返回按钮 */
+        .back-btn {
+            position: absolute;
+            left: 0.8rem;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.3rem;
+            color: #1a3a30;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.3rem 0.6rem;
+            display: none;
+        }
+        .view-only-mode .back-btn { display: block; }
+        .view-only-mode .topbar { padding-left: 3rem; }
 
         .breadcrumb {
             font-size: 0.85rem;
@@ -1391,6 +1418,7 @@
 <body>
 <div class="app" id="app">
     <div class="topbar">
+        <button class="back-btn" onclick="goBackFromView()">←</button>
         <h1>🏡 广元房建车间 <small>· 设备技术台账</small></h1>
         <span class="badge">📋 离线演示版</span>
         <span class="user">👤 检查分析工区</span>
@@ -3905,6 +3933,93 @@ function recalcDiseaseCounts(entityId) {
         }, { passive: true });
     })();
 
+    // ===== 查看模式 =====
+    var VIEW_ONLY_MODE = true; // 默认开启查看模式
+    
+    function loadViewMode() {
+        try {
+            var saved = localStorage.getItem('viewOnlyMode');
+            if (saved !== null) {
+                VIEW_ONLY_MODE = saved === 'true';
+            }
+        } catch(e) {}
+        applyViewMode();
+    }
+    
+    function saveViewMode() {
+        try {
+            localStorage.setItem('viewOnlyMode', VIEW_ONLY_MODE);
+        } catch(e) {}
+    }
+    
+    function toggleViewMode() {
+        VIEW_ONLY_MODE = !VIEW_ONLY_MODE;
+        saveViewMode();
+        applyViewMode();
+        // 重新渲染当前页面
+        if (currentView === 'home') { renderHomePage(); }
+        else if (currentView === 'station') { openStation(currentStationId, currentStationName); }
+        else if (currentView === 'block') { openBlock(currentBlockId); }
+        else if (currentView === 'device') { openDevice(currentDeviceId); }
+        showToast(VIEW_ONLY_MODE ? '👁️ 已切换到查看模式' : '✏️ 已切换到编辑模式');
+    }
+    
+    function applyViewMode() {
+        var body = document.body;
+        if (VIEW_ONLY_MODE) {
+            body.classList.add('view-only-mode');
+        } else {
+            body.classList.remove('view-only-mode');
+        }
+    }
+    
+    // 连点标题5次切换模式
+    (function setupTitleClick() {
+        var clickCount = 0;
+        var clickTimer = null;
+        document.addEventListener('click', function(e) {
+            var h1 = e.target.closest('.topbar h1');
+            if (!h1) return;
+            clickCount++;
+            if (clickTimer) clearTimeout(clickTimer);
+            clickTimer = setTimeout(function() {
+                clickCount = 0;
+            }, 1500);
+            if (clickCount >= 5) {
+                clickCount = 0;
+                toggleViewMode();
+            }
+        });
+    })();
+
+    function goBackFromView() {
+        if (currentView === 'home') return;
+        if (currentView === 'substruct') {
+            var ss = currentSubStructId ? getSubStructure(currentSubStructId) : null;
+            if (ss && ss.parentDeviceId) {
+                currentSubStructId = null;
+                openDevice(ss.parentDeviceId);
+            } else {
+                goHome();
+            }
+        } else if (currentView === 'device') {
+            var dev = currentDeviceId ? getDevice(currentDeviceId) : null;
+            if (dev && dev.blockId) {
+                openBlock(dev.blockId);
+            } else if (dev && dev.stationId) {
+                var st = getStationById(dev.stationId);
+                openStation(dev.stationId, st ? st.name : '');
+            } else {
+                goHome();
+            }
+        } else if (currentView === 'block') {
+            goBackFromBlock();
+        } else if (currentView === 'station') {
+            goHome();
+        }
+    }
+    window.goBackFromView = goBackFromView;
+
     function goHome() {
         currentView = 'home';
         currentDeviceId = null;
@@ -3927,7 +4042,7 @@ function recalcDiseaseCounts(entityId) {
                 <div class="tabs" id="tabContainer" style="margin:0;overflow-x:auto;flex-wrap:nowrap;">
                     ${tabsHtml}
                 </div>
-                <button class="btn" onclick="openAddStationModal()" style="white-space:nowrap;">➕ 新增站点</button>
+                <button class="btn view-hide" onclick="openAddStationModal()" style="white-space:nowrap;">➕ 新增站点</button>
             </div>
             <div class="search-box" id="homeSearch">
                 <input type="text" id="homeSearchInput" placeholder="🔍 搜索车站名称..." autocomplete="off" />
@@ -4097,7 +4212,7 @@ function recalcDiseaseCounts(entityId) {
             grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:3rem 1rem;color:#7a9a8a;">
                 <div style="font-size:3rem;margin-bottom:0.8rem;">🏗️</div>
                 <div style="font-size:1rem;color:#4f7062;margin-bottom:0.5rem;">暂无站点</div>
-                <div style="font-size:0.85rem;color:#7a9a8a;">点击右上角「➕ 新增站点」开始添加</div>
+                <div style="font-size:0.85rem;color:#7a9a8a;" class="view-hide">点击右上角「➕ 新增站点」开始添加</div>
             </div>`;
             return;
         }
@@ -4848,9 +4963,9 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         var photos = getDevicePhotos(ssId);
         var container = document.getElementById('pageContainer');
 
-        // 重置所有折叠模块为收起状态
+        // 重置所有折叠模块：台账信息默认展开，其他收起
         sectionExpanded = {};
-
+        sectionExpanded['infoGrid'] = true;
         window.devicePhotosList = photos;
         window.issueImagesMap = {};
         window.issueRepairPhotosMap = {};
@@ -4931,7 +5046,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
 
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:0.8rem;">
                     <div style="font-size:0.85rem;font-weight:500;color:#1a3a30;">📸 照片</div>
-                    <button class="btn btn-sm" onclick="uploadDevicePhoto()">➕ 上传照片</button>
+                    <button class="btn btn-sm view-hide" onclick="uploadDevicePhoto()">➕ 上传照片</button>
                 </div>
                 <div class="photo-grid" id="photoGrid">
         `;
@@ -5164,7 +5279,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
 
         html += `
             <div class="btn-group">
-                <button class="btn" onclick="openModal('${ssId}')">➕ 新增问题</button>
+                <button class="btn view-hide" onclick="openModal('${ssId}')">➕ 新增问题</button>
                 <button class="btn btn-outline" onclick="openIssueLibraryModal()">📚 问题库</button>
                 <button class="btn btn-outline" onclick="openDevice('${ss.parentDeviceId}')">← 返回主设备</button>
             </div>
@@ -5291,9 +5406,9 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.5rem;">
                     <div style="font-size:0.85rem;color:#4f7062;">
-                        共 <span id="deviceCount">${totalDeviceCount + totalBlockCount}</span> 个（🏠 ${houseCount}房屋 · 🏗️ ${structCount}构筑物${totalBlockCount > 0 ? ' · 📦 ' + totalBlockCount + '块' : ''}）· 可拖拽到房屋或块
+                        共 <span id="deviceCount">${totalDeviceCount + totalBlockCount}</span> 个（🏠 ${houseCount}房屋 · 🏗️ ${structCount}构筑物${totalBlockCount > 0 ? ' · 📦 ' + totalBlockCount + '块' : ''}）<span class="view-hide"> · 可拖拽到房屋或块</span>
                     </div>
-                    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+                    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;" class="view-hide">
                         <button class="btn btn-sm" onclick="openAddDeviceFromLedgerModal()" style="font-size:0.8rem;">📥 从台账添加</button>
                         <button class="btn btn-sm" onclick="openAddDeviceModal()" style="font-size:0.8rem;">➕ 手动新增</button>
                         <button class="btn btn-sm" onclick="openAddBlockModal()" style="font-size:0.8rem;">📦 新建块</button>
@@ -5730,7 +5845,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     <div style="font-size:0.85rem;color:#4f7062;">
                         共 <span id="deviceCount">${totalDeviceCount + totalBlockCount}</span> 个（🏠 ${houseCount}房屋 · 🏗️ ${structCount}构筑物${totalBlockCount > 0 ? ' · 📦 ' + totalBlockCount + '子块' : ''}）
                     </div>
-                    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+                    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;" class="view-hide">
                         <button class="btn btn-sm" onclick="openAddDeviceFromLedgerModal()" style="font-size:0.8rem;">📥 从台账添加</button>
                         <button class="btn btn-sm" onclick="openAddDeviceModal()" style="font-size:0.8rem;">➕ 手动新增</button>
                         ${currentBlockDepth < 1 ? '<button class="btn btn-sm" onclick="openAddBlockModal()" style="font-size:0.8rem;">📦 新建子块</button><button class="btn btn-sm btn-outline" onclick="openImportBlockModal()" style="font-size:0.8rem;">📋 批量导入子块</button>' : ''}
@@ -6468,9 +6583,9 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         const photos = getDevicePhotos(deviceId);
         const container = document.getElementById('pageContainer');
 
-        // 重置所有折叠模块为收起状态
+        // 重置所有折叠模块：台账信息默认展开，其他收起
         sectionExpanded = {};
-        sectionExpanded['subStructGrid'] = true;
+        sectionExpanded['infoGrid'] = true;
 
         // 暴露照片列表到全局，供 onclick 使用
         window.devicePhotosList = photos;
@@ -6558,7 +6673,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     <div class="section-header" onclick="toggleSection('subStructGrid','toggleSubStructBtn','展开 ▼','收起 ▲')">
                         <h3>🏗️ 附属构筑物</h3>
                         <div style="display:flex;align-items:center;gap:0.5rem;">
-                            <div class="header-actions" onclick="event.stopPropagation()">
+                            <div class="header-actions view-hide" onclick="event.stopPropagation()">
                                 <button class="btn btn-sm" style="font-size:0.72rem;padding:0.25rem 0.5rem;" onclick="openImportSubStructModal()">📥 导入</button>
                                 <button class="btn btn-sm btn-outline" style="font-size:0.72rem;padding:0.25rem 0.5rem;" onclick="openAddSubStructModal()">➕ 新增</button>
                             </div>
@@ -6592,7 +6707,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                 <!-- 照片 -->
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:0.8rem;">
                     <div style="font-size:0.85rem;font-weight:500;color:#1a3a30;">📸 照片</div>
-                    <button class="btn btn-sm" onclick="uploadDevicePhoto()">➕ 上传照片</button>
+                    <button class="btn btn-sm view-hide" onclick="uploadDevicePhoto()">➕ 上传照片</button>
                 </div>
                 <div class="photo-grid" id="photoGrid">
         `;
@@ -6842,9 +6957,9 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         // 按钮
         html += `
             <div class="btn-group">
-                <button class="btn" onclick="openModal('${deviceId}')">➕ 新增问题</button>
+                <button class="btn view-hide" onclick="openModal('${deviceId}')">➕ 新增问题</button>
                 <button class="btn btn-outline" onclick="openIssueLibraryModal()">📚 问题库</button>
-                <button class="btn btn-outline" onclick="openEditDeviceModal()">✏️ 编辑台账</button>
+                <button class="btn btn-outline view-hide" onclick="openEditDeviceModal()">✏️ 编辑台账</button>
                 <button class="btn btn-outline" onclick="goBackFromDevice()">← 返回</button>
             </div>
         `;
@@ -7196,6 +7311,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         setupIssueFileInput();
         setupPhotoModalFileInput();
         setupRepairFileInput();
+        loadViewMode();
         goHome();
     });
 
