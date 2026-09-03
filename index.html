@@ -199,32 +199,32 @@
         }
         .card .badge-count.danger { background: #f2e0d8; color: #8f4a3a; }
         .card.has-disease {
-            border-color: #e8a060 !important;
-            background: linear-gradient(135deg, #fff5ec, #ffe8d5) !important;
-            box-shadow: 0 4px 16px rgba(232,160,96,0.18);
+            border: 2px solid #ff6a00 !important;
+            background: linear-gradient(135deg, #fff0e0, #ffd8a8) !important;
+            box-shadow: 0 4px 20px rgba(255,106,0,0.25) !important;
             position: relative;
+            overflow: hidden;
         }
         .card.has-disease::before {
             content: '';
             position: absolute;
             top: 0; left: 0; right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #ff7a3a, #e8a060);
-            border-radius: 12px 12px 0 0;
+            height: 6px;
+            background: linear-gradient(90deg, #ff4400, #ff8800);
         }
         .block-card.has-disease {
-            border-color: #e8a060 !important;
-            background: linear-gradient(135deg, #fff5ec, #ffe8d5) !important;
-            box-shadow: 0 4px 16px rgba(232,160,96,0.18);
+            border: 2px solid #ff6a00 !important;
+            background: linear-gradient(135deg, #fff0e0, #ffd8a8) !important;
+            box-shadow: 0 4px 20px rgba(255,106,0,0.25) !important;
             position: relative;
+            overflow: hidden;
         }
         .block-card.has-disease::before {
             content: '';
             position: absolute;
             top: 0; left: 0; right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #ff7a3a, #e8a060);
-            border-radius: 12px 12px 0 0;
+            height: 6px;
+            background: linear-gradient(90deg, #ff4400, #ff8800);
         }
         .card .view-btn {
             display: inline-block;
@@ -4292,8 +4292,10 @@ function recalcDiseaseCounts(entityId) {
                 return sum + getIssues(d.id).length;
             }, 0);
             const stationDisease = stationHasDisease(item.id);
+            var stDiseaseStyle = stationDisease ? ' style="background:linear-gradient(135deg,#fff0e0,#ffd8a8);border:2px solid #ff6a00;box-shadow:0 4px 20px rgba(255,106,0,0.25);position:relative;overflow:hidden;"' : '';
             html += `
-                <div class="card draggable-card${stationDisease ? ' has-disease' : ''}" data-station-id="${item.id}" onclick="openStation('${item.id}', '${item.name}')">
+                <div class="card draggable-card${stationDisease ? ' has-disease' : ''}" data-station-id="${item.id}" onclick="openStation('${item.id}', '${item.name}')"${stDiseaseStyle}>
+                    ${stationDisease ? '<div style="position:absolute;top:0;left:0;right:0;height:6px;background:linear-gradient(90deg,#ff4400,#ff8800);"></div>' : ''}
                     <button class="card-del-btn" onclick="event.stopPropagation(); confirmDeleteStation('${item.id}','${item.name}')" title="删除站点">×</button>
                     <button class="card-rename-btn" onclick="event.stopPropagation(); renameStation('${item.id}')" title="重命名">✏</button>
                     <span class="emoji">${emoji}</span>
@@ -5460,7 +5462,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     <span style="font-size:0.85rem;color:#4f7062;">${lineLabel}</span>
                 </div>
                 <div class="search-box" id="stationSearch">
-                    <input type="text" id="stationSearchInput" placeholder="🔍 搜索设备名称..." autocomplete="off" />
+                    <input type="text" id="stationSearchInput" placeholder="🔍 搜索设备名称或台账尾号..." autocomplete="off" />
                     <div class="suggestions" id="stationSuggestions"></div>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.5rem;">
@@ -5496,8 +5498,10 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var counts = getBlockDeviceCounts(b.id);
                     var issueCnt = getBlockIssueCount(b.id);
                     var bDisease = blockHasDisease(b.id);
+                    var bDiseaseStyle = bDisease ? ' style="background:linear-gradient(135deg,#fff0e0,#ffd8a8);border:2px solid #ff6a00;box-shadow:0 4px 20px rgba(255,106,0,0.25);position:relative;overflow:hidden;"' : ' style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);"';
                     html += `
-                        <div class="card block-card draggable-card${bDisease ? ' has-disease' : ''}" data-block-id="${b.id}" data-device-name="${b.name}"${bDisease ? '' : ' style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);"'}>
+                        <div class="card block-card draggable-card${bDisease ? ' has-disease' : ''}" data-block-id="${b.id}" data-device-name="${b.name}"${bDiseaseStyle}>
+                            ${bDisease ? '<div style="position:absolute;top:0;left:0;right:0;height:6px;background:linear-gradient(90deg,#ff4400,#ff8800);"></div>' : ''}
                             <button class="card-del-btn" onclick="event.stopPropagation(); confirmDeleteBlock('${b.id}','${b.name}')" title="删除块">×</button>
                             <button class="card-rename-btn" onclick="event.stopPropagation(); renameBlock('${b.id}')" title="重命名">✏</button>
                             <span class="emoji">📦</span>
@@ -5515,10 +5519,14 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var dDisease = hasActiveDisease(d.id);
                     var isHouse = d.type === '房屋';
                     var isStruct = d.type === '构筑物';
-                    var dragAttrs = (isStruct || isHouse) ? ' draggable="true" style="cursor:grab;"' : '';
+                    var dragAttrs = (isStruct || isHouse) ? ' draggable="true"' : '';
                     var dropClass = isHouse ? ' drop-target-house' : '';
+                    var diseaseStyle = dDisease ? 'background:linear-gradient(135deg,#fff0e0,#ffd8a8);border:2px solid #ff6a00;box-shadow:0 4px 20px rgba(255,106,0,0.25);' : '';
+                    var cursorStyle = (isStruct || isHouse) ? 'cursor:grab;' : '';
+                    var styleStr = (diseaseStyle || cursorStyle) ? ' style="' + diseaseStyle + cursorStyle + '"' : '';
                     html += `
-                        <div class="card${dropClass}${dDisease ? ' has-disease' : ''} draggable-card" data-device-id="${d.id}" data-device-name="${d.name}" data-device-type="${d.type || ''}"${dragAttrs}>
+                        <div class="card${dropClass}${dDisease ? ' has-disease' : ''} draggable-card" data-device-id="${d.id}" data-device-name="${d.name}" data-device-type="${d.type || ''}"${dragAttrs}${styleStr}>
+                            ${dDisease ? '<div style="position:absolute;top:0;left:0;right:0;height:6px;background:linear-gradient(90deg,#ff4400,#ff8800);"></div>' : ''}
                             <button class="card-del-btn" onclick="event.stopPropagation(); confirmDeleteDevice('${d.id}','${d.name}')" title="删除设备">×</button>
                             <span class="emoji">${d.type === '房屋' ? '🏠' : (d.type === '构筑物' ? '🏗️' : '📦')}</span>
                             <div class="name">${d.name}</div>
@@ -5711,37 +5719,111 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         }
         window.batchDeleteDevices = batchDeleteDevices;
 
-        // 搜索过滤
+        // 搜索过滤（支持名称和台账编号/尾号，含块内设备）
         const searchInput = document.getElementById('stationSearchInput');
         if (searchInput) {
             searchInput.addEventListener('input', function() {
                 const val = this.value.trim().toLowerCase();
                 const cards = document.querySelectorAll('#deviceGrid .card');
                 let count = 0;
-                cards.forEach(c => {
-                    const name = c.dataset.deviceName;
-                    if (name && name.toLowerCase().includes(val)) {
-                        c.style.display = '';
-                        count++;
-                    } else {
-                        c.style.display = 'none';
-                    }
-                });
-                var visibleHouses = 0, visibleStructs = 0;
-                cards.forEach(function(c) {
-                    if (c.style.display !== 'none') {
-                        if (c.dataset.deviceType === '房屋') {
-                            visibleHouses++;
-                            var dev = getDevice(c.dataset.deviceId);
-                            if (dev && dev.subStructures) {
-                                visibleStructs += (getSubStructuresByDevice(dev.id) || []).length;
+
+                if (!val) {
+                    cards.forEach(c => { c.style.display = ''; count++; });
+                } else {
+                    var allDevices = dataCache.devices[currentStationId] || [];
+                    var matchedDevices = allDevices.filter(function(d) {
+                        var nameMatch = d.name && d.name.toLowerCase().indexOf(val) >= 0;
+                        var codeMatch = d.code && String(d.code).toLowerCase().indexOf(val) >= 0;
+                        return nameMatch || codeMatch;
+                    });
+                    var matchedDeviceIds = {};
+                    matchedDevices.forEach(function(d) { matchedDeviceIds[d.id] = true; });
+
+                    var blocksWithMatch = {};
+                    matchedDevices.forEach(function(d) {
+                        if (d.blockId) {
+                            var bid = d.blockId;
+                            while (bid) {
+                                blocksWithMatch[bid] = true;
+                                var b = dataCache.blocks[bid];
+                                if (b && b.parentType === 'block') { bid = b.parentId; }
+                                else { bid = null; }
                             }
-                        } else if (c.dataset.deviceType === '构筑物') {
-                            visibleStructs++;
+                        }
+                    });
+
+                    cards.forEach(c => {
+                        var name = c.dataset.deviceName || '';
+                        var blockId = c.dataset.blockId;
+                        var show = false;
+                        if (blockId) {
+                            if (name.toLowerCase().indexOf(val) >= 0) show = true;
+                            if (blocksWithMatch[blockId]) show = true;
+                        } else {
+                            if (name.toLowerCase().indexOf(val) >= 0) show = true;
+                        }
+                        if (show) { c.style.display = ''; count++; }
+                        else { c.style.display = 'none'; }
+                    });
+
+                    var gridEl = document.getElementById('deviceGrid');
+                    var oldSearchResults = gridEl.querySelectorAll('.search-result-item');
+                    oldSearchResults.forEach(function(el) { el.remove(); });
+
+                    if (matchedDevices.length > 0) {
+                        var hiddenMatches = matchedDevices.filter(function(d) {
+                            return d.blockId;
+                        });
+                        // 去掉已经直接显示的
+                        var visibleIds = {};
+                        cards.forEach(function(c) {
+                            if (c.dataset.deviceId && c.style.display !== 'none') {
+                                visibleIds[c.dataset.deviceId] = true;
+                            }
+                        });
+                        hiddenMatches = hiddenMatches.filter(function(d) { return !visibleIds[d.id]; });
+
+                        if (hiddenMatches.length > 0) {
+                            var extraHtml = '<div style="grid-column:1/-1;font-size:0.8rem;color:#4f7062;padding:0.6rem 0.4rem;border-top:1px dashed #c4d8ce;margin-top:0.5rem;">📍 以下设备在块/子块内：</div>';
+                            hiddenMatches.forEach(function(d) {
+                                var emoji = d.type === '房屋' ? '🏠' : '🏗️';
+                                var path = [];
+                                var bid = d.blockId;
+                                while (bid) {
+                                    var b = dataCache.blocks[bid];
+                                    if (b) { path.unshift(b.name); bid = (b.parentType === 'block') ? b.parentId : null; }
+                                    else { bid = null; }
+                                }
+                                var pathStr = path.join(' / ');
+                                extraHtml += '<div class="card search-result-item" style="border-color:#d8e4de;background:#f5faf7;cursor:pointer;" onclick="openDevice(\'' + d.id + '\')"><span class="emoji">' + emoji + '</span><div class="name">' + d.name + '</div><div class="sub" style="color:#7a9a8a;font-size:0.75rem;">📦 ' + pathStr + '</div><button class="view-btn">查看</button></div>';
+                                count++;
+                            });
+                            gridEl.insertAdjacentHTML('beforeend', extraHtml);
                         }
                     }
+                }
+
+                var visibleHouses = 0, visibleStructs = 0, visibleBlocks = 0;
+                cards.forEach(function(c) {
+                    if (c.style.display !== 'none') {
+                        if (c.dataset.blockId) { visibleBlocks++; }
+                        else if (c.dataset.deviceType === '房屋') { visibleHouses++; }
+                        else if (c.dataset.deviceType === '构筑物') { visibleStructs++; }
+                    }
                 });
-                document.getElementById('deviceCount').textContent = count + ' 个（🏠 ' + visibleHouses + '房屋 · 🏗️ ' + visibleStructs + '构筑物）';
+                var extraCards = document.querySelectorAll('#deviceGrid .search-result-item');
+                extraCards.forEach(function(c) {
+                    visibleStructs++;
+                });
+                var total = visibleHouses + visibleStructs + visibleBlocks + extraCards.length;
+                var countText = total + ' 个';
+                var parts = [];
+                if (visibleHouses > 0) parts.push('🏠 ' + visibleHouses + '房屋');
+                if (visibleStructs > 0) parts.push('🏗️ ' + visibleStructs + '构筑物');
+                if (visibleBlocks > 0) parts.push('📦 ' + visibleBlocks + '块');
+                if (parts.length > 0) countText += '（' + parts.join(' · ') + '）';
+                var countEl = document.getElementById('deviceCount');
+                if (countEl) countEl.textContent = countText;
             });
         }
 
@@ -5899,7 +5981,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     <span style="font-size:0.85rem;color:#4f7062;">${currentBlockDepth > 0 ? '子块' : '块'}</span>
                 </div>
                 <div class="search-box" id="stationSearch">
-                    <input type="text" id="stationSearchInput" placeholder="🔍 搜索设备名称..." autocomplete="off" />
+                    <input type="text" id="stationSearchInput" placeholder="🔍 搜索设备名称或台账尾号..." autocomplete="off" />
                     <div class="suggestions" id="stationSuggestions"></div>
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.5rem;">
@@ -5936,8 +6018,10 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var issueCnt = getBlockIssueCount(b.id);
                     var childBlocks = getBlocksByParent('block', b.id);
                     var bDisease = blockHasDisease(b.id);
+                    var bDiseaseStyle = bDisease ? ' style="background:linear-gradient(135deg,#fff0e0,#ffd8a8);border:2px solid #ff6a00;box-shadow:0 4px 20px rgba(255,106,0,0.25);position:relative;overflow:hidden;"' : ' style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);"';
                     html += `
-                        <div class="card block-card draggable-card${bDisease ? ' has-disease' : ''}" data-block-id="${b.id}" data-device-name="${b.name}"${bDisease ? '' : ' style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);"'}>
+                        <div class="card block-card draggable-card${bDisease ? ' has-disease' : ''}" data-block-id="${b.id}" data-device-name="${b.name}"${bDiseaseStyle}>
+                            ${bDisease ? '<div style="position:absolute;top:0;left:0;right:0;height:6px;background:linear-gradient(90deg,#ff4400,#ff8800);"></div>' : ''}
                             <button class="card-del-btn" onclick="event.stopPropagation(); confirmDeleteBlock('${b.id}','${b.name}')" title="删除块">×</button>
                             <button class="card-rename-btn" onclick="event.stopPropagation(); renameBlock('${b.id}')" title="重命名">✏</button>
                             <span class="emoji">📦</span>
@@ -5955,10 +6039,14 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var dDisease = hasActiveDisease(d.id);
                     var isHouse = d.type === '房屋';
                     var isStruct = d.type === '构筑物';
-                    var dragAttrs = (isStruct || isHouse) ? ' draggable="true" style="cursor:grab;"' : '';
+                    var dragAttrs = (isStruct || isHouse) ? ' draggable="true"' : '';
                     var dropClass = isHouse ? ' drop-target-house' : '';
+                    var diseaseStyle = dDisease ? 'background:linear-gradient(135deg,#fff0e0,#ffd8a8);border:2px solid #ff6a00;box-shadow:0 4px 20px rgba(255,106,0,0.25);' : '';
+                    var cursorStyle = (isStruct || isHouse) ? 'cursor:grab;' : '';
+                    var styleStr = (diseaseStyle || cursorStyle) ? ' style="' + diseaseStyle + cursorStyle + '"' : '';
                     html += `
-                        <div class="card${dropClass}${dDisease ? ' has-disease' : ''} draggable-card" data-device-id="${d.id}" data-device-name="${d.name}" data-device-type="${d.type || ''}"${dragAttrs}>
+                        <div class="card${dropClass}${dDisease ? ' has-disease' : ''} draggable-card" data-device-id="${d.id}" data-device-name="${d.name}" data-device-type="${d.type || ''}"${dragAttrs}${styleStr}>
+                            ${dDisease ? '<div style="position:absolute;top:0;left:0;right:0;height:6px;background:linear-gradient(90deg,#ff4400,#ff8800);"></div>' : ''}
                             <button class="card-del-btn" onclick="event.stopPropagation(); confirmDeleteDevice('${d.id}','${d.name}')" title="删除设备">×</button>
                             <span class="emoji">${d.type === '房屋' ? '🏠' : (d.type === '构筑物' ? '🏗️' : '📦')}</span>
                             <div class="name">${d.name}</div>
@@ -6326,38 +6414,110 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             });
         });
 
-        // 搜索过滤
+        // 搜索过滤（支持名称和台账编号/尾号）
         const searchInput = document.getElementById('stationSearchInput');
         if (searchInput) {
             searchInput.addEventListener('input', function() {
                 const val = this.value.trim().toLowerCase();
                 const cards = document.querySelectorAll('#deviceGrid .card');
                 let count = 0;
-                cards.forEach(c => {
-                    const name = c.dataset.deviceName;
-                    if (name && name.toLowerCase().includes(val)) {
-                        c.style.display = '';
-                        count++;
-                    } else {
-                        c.style.display = 'none';
-                    }
-                });
-                var visibleHouses = 0, visibleStructs = 0;
-                cards.forEach(function(c) {
-                    if (c.style.display !== 'none') {
-                        if (c.dataset.deviceType === '房屋') {
-                            visibleHouses++;
-                            var dev = getDevice(c.dataset.deviceId);
-                            if (dev && dev.subStructures) {
-                                visibleStructs += (getSubStructuresByDevice(dev.id) || []).length;
+
+                if (!val) {
+                    cards.forEach(c => { c.style.display = ''; count++; });
+                } else {
+                    var allDevices = dataCache.devices[currentStationId] || [];
+                    var matchedDevices = allDevices.filter(function(d) {
+                        var nameMatch = d.name && d.name.toLowerCase().indexOf(val) >= 0;
+                        var codeMatch = d.code && String(d.code).toLowerCase().indexOf(val) >= 0;
+                        return nameMatch || codeMatch;
+                    });
+                    var matchedDeviceIds = {};
+                    matchedDevices.forEach(function(d) { matchedDeviceIds[d.id] = true; });
+
+                    var blocksWithMatch = {};
+                    matchedDevices.forEach(function(d) {
+                        if (d.blockId) {
+                            var bid = d.blockId;
+                            while (bid) {
+                                blocksWithMatch[bid] = true;
+                                var b = dataCache.blocks[bid];
+                                if (b && b.parentType === 'block') { bid = b.parentId; }
+                                else { bid = null; }
                             }
-                        } else if (c.dataset.deviceType === '构筑物') {
-                            visibleStructs++;
+                        }
+                    });
+
+                    cards.forEach(c => {
+                        var name = c.dataset.deviceName || '';
+                        var blockId = c.dataset.blockId;
+                        var show = false;
+                        if (blockId) {
+                            if (name.toLowerCase().indexOf(val) >= 0) show = true;
+                            if (blocksWithMatch[blockId]) show = true;
+                        } else {
+                            if (name.toLowerCase().indexOf(val) >= 0) show = true;
+                        }
+                        if (show) { c.style.display = ''; count++; }
+                        else { c.style.display = 'none'; }
+                    });
+
+                    var gridEl = document.getElementById('deviceGrid');
+                    var oldSearchResults = gridEl.querySelectorAll('.search-result-item');
+                    oldSearchResults.forEach(function(el) { el.remove(); });
+
+                    if (matchedDevices.length > 0) {
+                        var hiddenMatches = matchedDevices.filter(function(d) {
+                            return d.blockId;
+                        });
+                        var visibleIds = {};
+                        cards.forEach(function(c) {
+                            if (c.dataset.deviceId && c.style.display !== 'none') {
+                                visibleIds[c.dataset.deviceId] = true;
+                            }
+                        });
+                        hiddenMatches = hiddenMatches.filter(function(d) { return !visibleIds[d.id]; });
+
+                        if (hiddenMatches.length > 0) {
+                            var extraHtml = '<div style="grid-column:1/-1;font-size:0.8rem;color:#4f7062;padding:0.6rem 0.4rem;border-top:1px dashed #c4d8ce;margin-top:0.5rem;">📍 以下设备在块/子块内：</div>';
+                            hiddenMatches.forEach(function(d) {
+                                var emoji = d.type === '房屋' ? '🏠' : '🏗️';
+                                var path = [];
+                                var bid = d.blockId;
+                                while (bid) {
+                                    var b = dataCache.blocks[bid];
+                                    if (b) { path.unshift(b.name); bid = (b.parentType === 'block') ? b.parentId : null; }
+                                    else { bid = null; }
+                                }
+                                var pathStr = path.join(' / ');
+                                extraHtml += '<div class="card search-result-item" style="border-color:#d8e4de;background:#f5faf7;cursor:pointer;" onclick="openDevice(\'' + d.id + '\')"><span class="emoji">' + emoji + '</span><div class="name">' + d.name + '</div><div class="sub" style="color:#7a9a8a;font-size:0.75rem;">📦 ' + pathStr + '</div><button class="view-btn">查看</button></div>';
+                                count++;
+                            });
+                            gridEl.insertAdjacentHTML('beforeend', extraHtml);
                         }
                     }
+                }
+
+                var visibleHouses = 0, visibleStructs = 0, visibleBlocks = 0;
+                cards.forEach(function(c) {
+                    if (c.style.display !== 'none') {
+                        if (c.dataset.blockId) { visibleBlocks++; }
+                        else if (c.dataset.deviceType === '房屋') { visibleHouses++; }
+                        else if (c.dataset.deviceType === '构筑物') { visibleStructs++; }
+                    }
                 });
+                var extraCards = document.querySelectorAll('#deviceGrid .search-result-item');
+                extraCards.forEach(function(c) {
+                    visibleStructs++;
+                });
+                var total = visibleHouses + visibleStructs + visibleBlocks + extraCards.length;
+                var countText = total + ' 个';
+                var parts = [];
+                if (visibleHouses > 0) parts.push('🏠 ' + visibleHouses + '房屋');
+                if (visibleStructs > 0) parts.push('🏗️ ' + visibleStructs + '构筑物');
+                if (visibleBlocks > 0) parts.push('📦 ' + visibleBlocks + '块');
+                if (parts.length > 0) countText += '（' + parts.join(' · ') + '）';
                 var dc = document.getElementById('deviceCount');
-                if (dc) dc.textContent = count + ' 个（🏠 ' + visibleHouses + '房屋 · 🏗️ ' + visibleStructs + '构筑物）';
+                if (dc) dc.textContent = countText;
             });
         }
 
