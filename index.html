@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
@@ -2887,11 +2887,11 @@ function recalcDiseaseCounts(entityId) {
     }
 
     function hasActiveDisease(deviceId) {
-        var issues = getIssues(deviceId);
-        if (issues.length > 0) return true;
+        var device = getDevice(deviceId);
+        if (device && device.disease && device.disease.trim().length > 0) return true;
         var subs = getSubStructuresByDevice(deviceId);
         for (var i = 0; i < subs.length; i++) {
-            if (getIssues(subs[i].id).length > 0) return true;
+            if (subs[i].disease && subs[i].disease.trim().length > 0) return true;
         }
         return false;
     }
@@ -4493,7 +4493,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         { key: 'useFunction', label: '使用功能', span: 2 },
         { key: 'assetUnit', label: '资产列账单位', span: 1 },
         { key: 'financeClass', label: '财务分类', span: 1 },
-        { key: 'disease', label: '病害情况记录', span: 2 },
+        { key: 'disease', label: '2025年病害情况记录', span: 2 },
         { key: 'suggestion', label: '整治建议', span: 2 },
     ];
 
@@ -5053,7 +5053,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             { key:'useFunction', label:'使用功能' },
             { key:'assetUnit', label:'资产列账单位' },
             { key:'financeClass', label:'财务分类' },
-            { key:'disease', label:'病害情况记录' },
+            { key:'disease', label:'2025年病害情况记录' },
             { key:'suggestion', label:'整治建议' }
         ];
 
@@ -5067,10 +5067,10 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     📎 附属构筑物 · 归属：${parentDevice ? parentDevice.name : '未知'}
                 </div>
 
-                <!-- 病害情况记录 - 醒目顶部区块（从台账信息提取展示） -->
+                <!-- 2025年病害情况记录 - 醒目顶部区块（从台账信息提取展示） -->
                 <div class="disease-alert${(ss.disease || '').trim() ? '' : ' empty'}">
                     <div class="disease-alert-header">
-                        <h3>⚠️ 病害情况记录</h3>
+                        <h3>⚠️ 2025年病害情况记录</h3>
                         ${(ss.disease || '').trim() ? '<span class="badge">有记录</span>' : ''}
                     </div>
                     <div class="disease-alert-body">${ss.disease ? String(ss.disease).replace(/\n/g, '<br>') : '—'}</div>
@@ -6809,6 +6809,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         // 重置所有折叠模块：台账信息默认展开，其他收起
         sectionExpanded = {};
         sectionExpanded['infoGrid'] = true;
+        sectionExpanded['subStructGrid'] = false;
 
         // 暴露照片列表到全局，供 onclick 使用
         window.devicePhotosList = photos;
@@ -6840,7 +6841,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             { key:'useFunction', label:'使用功能' },
             { key:'assetUnit', label:'资产列账单位' },
             { key:'financeClass', label:'财务分类' },
-            { key:'disease', label:'病害情况记录' },
+            { key:'disease', label:'2025年病害情况记录' },
             { key:'suggestion', label:'整治建议' }
         ];
 
@@ -6851,10 +6852,10 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     <span class="code">${device.code}</span>
                 </div>
 
-                <!-- 病害情况记录 - 醒目顶部区块（从台账信息提取展示） -->
+                <!-- 2025年病害情况记录 - 醒目顶部区块（从台账信息提取展示） -->
                 <div class="disease-alert${(device.disease || '').trim() ? '' : ' empty'}">
                     <div class="disease-alert-header">
-                        <h3>⚠️ 病害情况记录</h3>
+                        <h3>⚠️ 2025年病害情况记录</h3>
                         ${(device.disease || '').trim() ? '<span class="badge">有记录</span>' : ''}
                     </div>
                     <div class="disease-alert-body">${device.disease ? String(device.disease).replace(/\n/g, '<br>') : '—'}</div>
@@ -6900,10 +6901,10 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                                 <button class="btn btn-sm" style="font-size:0.72rem;padding:0.25rem 0.5rem;" onclick="openImportSubStructModal()">📥 导入</button>
                                 <button class="btn btn-sm btn-outline" style="font-size:0.72rem;padding:0.25rem 0.5rem;" onclick="openAddSubStructModal()">➕ 新增</button>
                             </div>
-                            <span class="toggle-btn" id="toggleSubStructBtn">收起 ▲</span>
+                            <span class="toggle-btn" id="toggleSubStructBtn">展开 ▼</span>
                         </div>
                     </div>
-                    <div class="substruct-grid show" id="subStructGrid">
+                    <div class="substruct-grid" id="subStructGrid">
         `;
         var subStructs = getSubStructuresByDevice(deviceId);
         if (subStructs.length === 0) {
