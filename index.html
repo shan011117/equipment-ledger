@@ -198,6 +198,34 @@
             width: fit-content;
         }
         .card .badge-count.danger { background: #f2e0d8; color: #8f4a3a; }
+        .card.has-disease {
+            border-color: #e8a060 !important;
+            background: linear-gradient(135deg, #fff5ec, #ffe8d5) !important;
+            box-shadow: 0 4px 16px rgba(232,160,96,0.18);
+            position: relative;
+        }
+        .card.has-disease::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #ff7a3a, #e8a060);
+            border-radius: 12px 12px 0 0;
+        }
+        .block-card.has-disease {
+            border-color: #e8a060 !important;
+            background: linear-gradient(135deg, #fff5ec, #ffe8d5) !important;
+            box-shadow: 0 4px 16px rgba(232,160,96,0.18);
+            position: relative;
+        }
+        .block-card.has-disease::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #ff7a3a, #e8a060);
+            border-radius: 12px 12px 0 0;
+        }
         .card .view-btn {
             display: inline-block;
             margin-top: 0.4rem;
@@ -2858,6 +2886,36 @@ function recalcDiseaseCounts(entityId) {
         return count;
     }
 
+    function hasActiveDisease(deviceId) {
+        var issues = getIssues(deviceId);
+        if (issues.length > 0) return true;
+        var subs = getSubStructuresByDevice(deviceId);
+        for (var i = 0; i < subs.length; i++) {
+            if (getIssues(subs[i].id).length > 0) return true;
+        }
+        return false;
+    }
+
+    function blockHasDisease(blockId) {
+        var devices = getDevicesByBlock(blockId);
+        for (var i = 0; i < devices.length; i++) {
+            if (hasActiveDisease(devices[i].id)) return true;
+        }
+        var childBlocks = getBlocksByParent('block', blockId);
+        for (var j = 0; j < childBlocks.length; j++) {
+            if (blockHasDisease(childBlocks[j].id)) return true;
+        }
+        return false;
+    }
+
+    function stationHasDisease(stationId) {
+        var allDevices = getAllDevicesByStation(stationId);
+        for (var i = 0; i < allDevices.length; i++) {
+            if (hasActiveDisease(allDevices[i].id)) return true;
+        }
+        return false;
+    }
+
     // ===== 排序与拖拽 =====
     // 排序优先级：块(0) > 房屋(1) > 构筑物(2)，同类内按 sortOrder 排序（无则用 createdAt）
     function getTypeRank(item) {
@@ -4233,8 +4291,9 @@ function recalcDiseaseCounts(entityId) {
             const issueCount = allDevices.reduce(function(sum, d) {
                 return sum + getIssues(d.id).length;
             }, 0);
+            const stationDisease = stationHasDisease(item.id);
             html += `
-                <div class="card draggable-card" data-station-id="${item.id}" onclick="openStation('${item.id}', '${item.name}')">
+                <div class="card draggable-card${stationDisease ? ' has-disease' : ''}" data-station-id="${item.id}" onclick="openStation('${item.id}', '${item.name}')">
                     <button class="card-del-btn" onclick="event.stopPropagation(); confirmDeleteStation('${item.id}','${item.name}')" title="删除站点">×</button>
                     <button class="card-rename-btn" onclick="event.stopPropagation(); renameStation('${item.id}')" title="重命名">✏</button>
                     <span class="emoji">${emoji}</span>
@@ -5436,8 +5495,9 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var b = item.data;
                     var counts = getBlockDeviceCounts(b.id);
                     var issueCnt = getBlockIssueCount(b.id);
+                    var bDisease = blockHasDisease(b.id);
                     html += `
-                        <div class="card block-card draggable-card" data-block-id="${b.id}" data-device-name="${b.name}" style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);">
+                        <div class="card block-card draggable-card${bDisease ? ' has-disease' : ''}" data-block-id="${b.id}" data-device-name="${b.name}"${bDisease ? '' : ' style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);"'}>
                             <button class="card-del-btn" onclick="event.stopPropagation(); confirmDeleteBlock('${b.id}','${b.name}')" title="删除块">×</button>
                             <button class="card-rename-btn" onclick="event.stopPropagation(); renameBlock('${b.id}')" title="重命名">✏</button>
                             <span class="emoji">📦</span>
@@ -5452,12 +5512,13 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var d = item.data;
                     const issues = getIssues(d.id);
                     const hasIssues = issues.length > 0;
+                    var dDisease = hasActiveDisease(d.id);
                     var isHouse = d.type === '房屋';
                     var isStruct = d.type === '构筑物';
                     var dragAttrs = (isStruct || isHouse) ? ' draggable="true" style="cursor:grab;"' : '';
                     var dropClass = isHouse ? ' drop-target-house' : '';
                     html += `
-                        <div class="card${dropClass} draggable-card" data-device-id="${d.id}" data-device-name="${d.name}" data-device-type="${d.type || ''}"${dragAttrs}>
+                        <div class="card${dropClass}${dDisease ? ' has-disease' : ''} draggable-card" data-device-id="${d.id}" data-device-name="${d.name}" data-device-type="${d.type || ''}"${dragAttrs}>
                             <button class="card-del-btn" onclick="event.stopPropagation(); confirmDeleteDevice('${d.id}','${d.name}')" title="删除设备">×</button>
                             <span class="emoji">${d.type === '房屋' ? '🏠' : (d.type === '构筑物' ? '🏗️' : '📦')}</span>
                             <div class="name">${d.name}</div>
@@ -5874,8 +5935,9 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var counts = getBlockDeviceCounts(b.id);
                     var issueCnt = getBlockIssueCount(b.id);
                     var childBlocks = getBlocksByParent('block', b.id);
+                    var bDisease = blockHasDisease(b.id);
                     html += `
-                        <div class="card block-card draggable-card" data-block-id="${b.id}" data-device-name="${b.name}" style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);">
+                        <div class="card block-card draggable-card${bDisease ? ' has-disease' : ''}" data-block-id="${b.id}" data-device-name="${b.name}"${bDisease ? '' : ' style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);"'}>
                             <button class="card-del-btn" onclick="event.stopPropagation(); confirmDeleteBlock('${b.id}','${b.name}')" title="删除块">×</button>
                             <button class="card-rename-btn" onclick="event.stopPropagation(); renameBlock('${b.id}')" title="重命名">✏</button>
                             <span class="emoji">📦</span>
@@ -5890,12 +5952,13 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var d = item.data;
                     const issues = getIssues(d.id);
                     const hasIssues = issues.length > 0;
+                    var dDisease = hasActiveDisease(d.id);
                     var isHouse = d.type === '房屋';
                     var isStruct = d.type === '构筑物';
                     var dragAttrs = (isStruct || isHouse) ? ' draggable="true" style="cursor:grab;"' : '';
                     var dropClass = isHouse ? ' drop-target-house' : '';
                     html += `
-                        <div class="card${dropClass} draggable-card" data-device-id="${d.id}" data-device-name="${d.name}" data-device-type="${d.type || ''}"${dragAttrs}>
+                        <div class="card${dropClass}${dDisease ? ' has-disease' : ''} draggable-card" data-device-id="${d.id}" data-device-name="${d.name}" data-device-type="${d.type || ''}"${dragAttrs}>
                             <button class="card-del-btn" onclick="event.stopPropagation(); confirmDeleteDevice('${d.id}','${d.name}')" title="删除设备">×</button>
                             <span class="emoji">${d.type === '房屋' ? '🏠' : (d.type === '构筑物' ? '🏗️' : '📦')}</span>
                             <div class="name">${d.name}</div>
