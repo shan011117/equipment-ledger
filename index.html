@@ -4078,6 +4078,78 @@ function recalcDiseaseCounts(entityId) {
     }
     window.goBackFromView = goBackFromView;
 
+    // ===== 页面位置记忆 =====
+    function saveViewState() {
+        try {
+            var state = {
+                view: currentView,
+                stationId: currentStationId,
+                stationName: currentStationName,
+                blockId: currentBlockId,
+                blockName: currentBlockName,
+                deviceId: currentDeviceId,
+                subStructId: currentSubStructId
+            };
+            // 首页时保存当前选中的线别分组
+            if (currentView === 'home') {
+                var activeTab = document.querySelector('.tab-btn.active');
+                if (activeTab) state.lineGroup = activeTab.dataset.group;
+            }
+            localStorage.setItem('gyfj_viewState', JSON.stringify(state));
+        } catch(e) {}
+    }
+
+    function restoreViewState() {
+        try {
+            var saved = localStorage.getItem('gyfj_viewState');
+            if (!saved) { goHome(); return false; }
+            var state = JSON.parse(saved);
+            if (!state || !state.view) { goHome(); return false; }
+
+            // 从最深层级开始恢复
+            if (state.view === 'substruct' && state.subStructId) {
+                var ss = getSubStructure(state.subStructId);
+                if (ss) { openSubStructure(state.subStructId); return true; }
+                // 附属构筑物不存在，降级到设备
+                state.view = 'device';
+                state.subStructId = null;
+            }
+            if (state.view === 'device' && state.deviceId) {
+                var d = getDevice(state.deviceId);
+                if (d) { openDevice(state.deviceId); return true; }
+                state.view = 'block';
+                state.deviceId = null;
+            }
+            if (state.view === 'block' && state.blockId) {
+                var b = getBlockById(state.blockId);
+                if (b) { openBlock(state.blockId); return true; }
+                state.view = 'station';
+                state.blockId = null;
+            }
+            if (state.view === 'station' && state.stationId) {
+                var st = getStationById(state.stationId);
+                if (st) { openStation(state.stationId, st.name); return true; }
+            }
+            // 都不行就回首页
+            goHome();
+            // 如果有线别分组记忆，切过去
+            if (state.lineGroup) {
+                setTimeout(function() {
+                    var tab = document.querySelector('.tab-btn[data-group="' + state.lineGroup + '"]');
+                    if (tab) {
+                        document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+                        tab.classList.add('active');
+                        renderStationGrid(state.lineGroup);
+                    }
+                }, 50);
+            }
+            return false;
+        } catch(e) {
+            goHome();
+            return false;
+        }
+    }
+
     function goHome() {
         currentView = 'home';
         currentDeviceId = null;
@@ -4085,6 +4157,7 @@ function recalcDiseaseCounts(entityId) {
         currentStationId = null;
         currentSubStructId = null;
         renderHomePage();
+        saveViewState();
     }
 
     function renderHomePage() {
@@ -4118,6 +4191,7 @@ function recalcDiseaseCounts(entityId) {
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 this.classList.add('active');
                 renderStationGrid(this.dataset.group);
+                saveViewState();
                 document.getElementById('homeSearchInput').value = '';
                 document.getElementById('homeSuggestions').classList.remove('show');
             });
@@ -5013,6 +5087,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         currentDeviceId = ssId; // 复用现有函数：issues/photos存储都按ID，不区分设备/附属构筑物
         currentView = 'substruct';
         renderSubStructureDetail(ssId);
+        saveViewState();
     }
 
     function renderSubStructureDetail(ssId) {
@@ -5453,6 +5528,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         var structCount = recCounts.structCount;
         var totalBlockCount = recCounts.blockCount;
         var totalDeviceCount = recCounts.deviceCount;
+        saveViewState();
 
         const container = document.getElementById('pageContainer');
         let html = `
@@ -5956,6 +6032,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         currentBlockDepth = getBlockDepth(blockId);
         currentDeviceId = null;
         currentSubStructId = null;
+        saveViewState();
 
         var devices = getDevicesByBlock(blockId);
         var blocks = getBlocksByParent('block', blockId);
@@ -6797,6 +6874,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         currentSubStructId = null;
         currentView = 'device';
         renderDeviceDetail(deviceId);
+        saveViewState();
     }
 
     function renderDeviceDetail(deviceId) {
@@ -7536,7 +7614,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         setupPhotoModalFileInput();
         setupRepairFileInput();
         loadViewMode();
-        goHome();
+        restoreViewState();
     });
 
     // ===== 问题库导入功能 =====
