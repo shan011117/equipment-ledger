@@ -2253,19 +2253,24 @@ function recalcDiseaseCounts(entityId) {
                                 var shouldImport = !localVersion || (serverVersion && serverVersion !== localVersion);
                                 
                                 if (shouldImport) {
-                                    // 先清空旧数据
-                                    var stores = ['appMeta', 'stations', 'devices', 'subStructures', 'issues', 'photos', 'photoThumbs', 'photoFulls', 'blocks'];
-                                    var clearRemaining = stores.length;
-                                    stores.forEach(function(storeName) {
-                                        try {
-                                            var clearTx = db.transaction(storeName, 'readwrite');
-                                            var clearReq = clearTx.objectStore(storeName).clear();
-                                            clearReq.onsuccess = function() { if (--clearRemaining === 0) doImport(); };
-                                            clearReq.onerror = function() { if (--clearRemaining === 0) doImport(); };
-                                        } catch(err) { if (--clearRemaining === 0) doImport(); }
-                                    });
-                                    
-                                    function doImport() {
+                                    // 首次使用：全部清空后完整导入
+                                    if (!localVersion) {
+                                        var stores = ['appMeta', 'stations', 'devices', 'subStructures', 'issues', 'photos', 'photoThumbs', 'photoFulls', 'blocks'];
+                                        var clearRemaining = stores.length;
+                                        stores.forEach(function(storeName) {
+                                            try {
+                                                var clearTx = db.transaction(storeName, 'readwrite');
+                                                var clearReq = clearTx.objectStore(storeName).clear();
+                                                clearReq.onsuccess = function() { if (--clearRemaining === 0) doFullImport(); };
+                                                clearReq.onerror = function() { if (--clearRemaining === 0) doFullImport(); };
+                                            } catch(err) { if (--clearRemaining === 0) doFullImport(); }
+                                        });
+                                    } else {
+                                        // 更新数据：合并模式，保留用户手动建的块、问题记录、照片等
+                                        doMergeUpdate();
+                                    }
+
+                                    function doFullImport() {
                                         var importRemaining = stores.length;
                                         stores.forEach(function(storeName) {
                                             try {
@@ -2278,9 +2283,101 @@ function recalcDiseaseCounts(entityId) {
                                             } catch(err) { if (--importRemaining === 0) saveVersion(); }
                                         });
                                     }
+
+                                    function doMergeUpdate() {
+                                        // 合并更新步骤：
+                                        // 1. stations：种子数据中有则更新/新增
+                                        // 2. devices：种子数据中有则更新台账字段，但保留 blockId
+                                        // 3. blocks：保留本地所有块，种子里有新块则追加
+                                        // 4. subStructures / issues / photos：用户数据，不动
+                                        // 5. appMeta：只更新 seedDataVersion，不动 lineList
+                                        var stepsDone = 0;
+                                        var totalSteps = 4; // stations, devices, blocks, appMeta
+
+                                        function stepDone() {
+                                            if (++stepsDone === totalSteps) saveVersion();
+                                        }
+
+                                        // --- 1. 合并 stations ---
+                                        try {
+                                            var stTx = db.transaction('stations', 'readwrite');
+                                            var stStore = stTx.objectStore('stations');
+                                            var seedStations = seedJson.data.stations || [];
+                                            seedStations.forEach(function(st) { stStore.put(st); });
+                                            stTx.oncomplete = stepDone;
+                                            stTx.onerror = stepDone;
+                                        } catch(e) { stepDone(); }
+
+                                        // --- 2. 合并 devices（保留 blockId 和 sortOrder）---
+                                        try {
+                                            var devTx = db.transaction('devices', 'readwrite');
+                                            var devStore = devTx.objectStore('devices');
+                                            var seedDevices = seedJson.data.devices || [];
+                                            var devRemaining = seedDevices.length;
+                                            if (devRemaining === 0) { stepDone(); }
+                                            else {
+                                                seedDevices.forEach(function(seedDev) {
+                                                    var getReq = devStore.get(seedDev.id);
+                                                    getReq.onsuccess = function() {
+                                                        var localDev = getReq.result;
+                                                        if (localDev) {
+                                                            // 本地已有：用种子数据更新台账字段，但保留 blockId 和 sortOrder
+                                                            var preservedBlockId = localDev.blockId;
+                                                            var preservedSortOrder = localDev.sortOrder;
+                                                            var merged = Object.assign({}, seedDev);
+                                                            if (preservedBlockId) merged.blockId = preservedBlockId;
+                                                            if (preservedSortOrder !== undefined) merged.sortOrder = preservedSortOrder;
+                                                            devStore.put(merged);
+                                                        } else {
+                                                            // 本地没有：直接新增
+                                                            devStore.put(seedDev);
+                                                        }
+                                                        if (--devRemaining === 0) stepDone();
+                                                    };
+                                                    getReq.onerror = function() {
+                                                        devStore.put(seedDev);
+                                                        if (--devRemaining === 0) stepDone();
+                                                    };
+                                                });
+                                            }
+                                        } catch(e) { stepDone(); }
+
+                                        // --- 3. 合并 blocks（保留本地块，追加种子中的新块）---
+                                        try {
+                                            var blkTx = db.transaction('blocks', 'readwrite');
+                                            var blkStore = blkTx.objectStore('blocks');
+                                            var seedBlocks = seedJson.data.blocks || [];
+                                            var blkRemaining = seedBlocks.length;
+                                            if (blkRemaining === 0) { stepDone(); }
+                                            else {
+                                                seedBlocks.forEach(function(seedBlk) {
+                                                    var getReq = blkStore.get(seedBlk.id);
+                                                    getReq.onsuccess = function() {
+                                                        if (!getReq.result) {
+                                                            // 本地没有这个块才新增
+                                                            blkStore.put(seedBlk);
+                                                        }
+                                                        if (--blkRemaining === 0) stepDone();
+                                                    };
+                                                    getReq.onerror = function() {
+                                                        blkStore.put(seedBlk);
+                                                        if (--blkRemaining === 0) stepDone();
+                                                    };
+                                                });
+                                            }
+                                        } catch(e) { stepDone(); }
+
+                                        // --- 4. 更新版本标记（不动 appMeta 里的其他内容）---
+                                        try {
+                                            var vTx = db.transaction('appMeta', 'readwrite');
+                                            vTx.objectStore('appMeta').put({ key: 'seedDataVersion', data: serverVersion });
+                                            vTx.oncomplete = function() { stepDone(); };
+                                            vTx.onerror = function() { stepDone(); };
+                                        } catch(e) { stepDone(); }
+                                    }
                                     
                                     function saveVersion() {
-                                        // 保存版本标记
+                                        // 保存版本标记（首次导入时 appMeta 已被清空重建，这里确保版本号写入）
                                         try {
                                             var vTx = db.transaction('appMeta', 'readwrite');
                                             vTx.objectStore('appMeta').put({ key: 'seedDataVersion', data: serverVersion });
