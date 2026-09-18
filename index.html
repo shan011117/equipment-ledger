@@ -1712,6 +1712,18 @@
     </div>
 </div>
 
+<!-- ===== 移动块到其他站弹窗 ===== -->
+<div class="modal" id="moveBlockToStationModal">
+    <div class="modal-box" style="max-width:420px;max-height:70vh;">
+        <h3>🚚 移到其他站</h3>
+        <p style="font-size:0.82rem;color:#7a9a8a;margin-bottom:0.6rem;" id="moveBlockToStationTip">选择目标站，整块（含子块和设备）将一起迁移：</p>
+        <div id="moveBlockToStationList" style="max-height:45vh;overflow-y:auto;"></div>
+        <div class="actions" style="margin-top:0.8rem;">
+            <button class="btn btn-outline" onclick="document.getElementById('moveBlockToStationModal').classList.remove('active')">取消</button>
+        </div>
+    </div>
+</div>
+
 <!-- ===== 批量导入附属构筑物弹窗 ===== -->
 <div class="modal" id="importSubStructModal">
     <div class="modal-box" style="max-width:600px;max-height:85vh;">
@@ -2857,8 +2869,8 @@ function recalcDiseaseCounts(entityId) {
     function addBlock(name, parentType, parentId, callback) {
         if (parentType === 'block') {
             var depth = getBlockDepth(parentId);
-            if (depth >= 1) {
-                alert('子块不能再嵌套块，最多两层');
+            if (depth >= 2) {
+                alert('小子块不能再嵌套块，最多三层');
                 return;
             }
         }
@@ -2945,10 +2957,10 @@ function recalcDiseaseCounts(entityId) {
         if (!block || !targetBlock) return false;
         if (blockId === targetBlockId) return false;
 
-        // 检查深度限制：移动后目标块深度 + 1 + 被移动块的深度 不能超过 1（即总共两层）
+        // 检查深度限制：移动后目标块深度 + 1 + 被移动块的深度 不能超过 2（即总共三层）
         var targetDepth = getBlockDepth(targetBlockId);
         var blockDepth = getBlockDepth(blockId);
-        if (targetDepth + 1 + blockDepth > 1) {
+        if (targetDepth + 1 + blockDepth > 2) {
             return false;
         }
 
@@ -2973,6 +2985,163 @@ function recalcDiseaseCounts(entityId) {
         return true;
     }
     window.moveBlockToBlock = moveBlockToBlock;
+
+    // 整块迁移到其他站（递归迁移所有子块和设备）
+    function moveBlockToStation(blockId, targetStationId) {
+        var block = dataCache.blocks[blockId];
+        if (!block) return false;
+        if (block.parentType === 'station' && block.parentId === targetStationId) return false;
+
+        // 找到当前块的源站
+        var sourceStationId = null;
+        var cur = block;
+        while (cur) {
+            if (cur.parentType === 'station') { sourceStationId = cur.parentId; break; }
+            cur = dataCache.blocks[cur.parentId];
+        }
+        if (!sourceStationId || sourceStationId === targetStationId) return false;
+
+        // 收集所有需要迁移的块（当前块 + 所有子块）
+        var allBlockIds = [];
+        function collectBlocks(bid) {
+            allBlockIds.push(bid);
+            var children = getBlocksByParent('block', bid);
+            children.forEach(function(c) { collectBlocks(c.id); });
+        }
+        collectBlocks(blockId);
+
+        // 收集所有需要迁移的设备 ID
+        var allDeviceIds = [];
+        allBlockIds.forEach(function(bid) {
+            var b = dataCache.blocks[bid];
+            if (b && b.deviceIds) {
+                b.deviceIds.forEach(function(did) { allDeviceIds.push(did); });
+            }
+        });
+
+        // 更新设备的 stationId，并在 dataCache.devices 中移动
+        allDeviceIds.forEach(function(did) {
+            var dev = getDevice(did);
+            if (dev) {
+                // 从源站移除
+                var srcArr = dataCache.devices[sourceStationId] || [];
+                dataCache.devices[sourceStationId] = srcArr.filter(function(d) { return d.id !== did; });
+                // 修改 stationId
+                dev.stationId = targetStationId;
+                // 加入目标站
+                if (!dataCache.devices[targetStationId]) dataCache.devices[targetStationId] = [];
+                dataCache.devices[targetStationId].push(dev);
+                // 保存到数据库
+                saveToDB('devices', did, dev);
+            }
+        });
+
+        // 更新块的 parentType 和 parentId（顶层块挂到站下，子块保持父子关系不变）
+        block.parentType = 'station';
+        block.parentId = targetStationId;
+        saveToDB('blocks', blockId, block);
+
+        // 子块的 parentType/parentId 不需要改，因为它们还是挂在父块下
+        allBlockIds.forEach(function(bid) {
+            if (bid !== blockId) {
+                var b = dataCache.blocks[bid];
+                if (b) saveToDB('blocks', bid, b);
+            }
+        });
+
+        return {
+            success: true,
+            blockCount: allBlockIds.length,
+            deviceCount: allDeviceIds.length
+        };
+    }
+    window.moveBlockToStation = moveBlockToStation;
+
+    // 设备上移一级（从块移出到父级）
+    function moveDeviceUpOneLevel(deviceId) {
+        var device = getDevice(deviceId);
+        if (!device || !device.blockId) return false;
+        var block = dataCache.blocks[device.blockId];
+        if (!block) return false;
+
+        // 从当前块移除
+        block.deviceIds = block.deviceIds.filter(function(id) { return id !== deviceId; });
+        saveToDB('blocks', block.id, block);
+
+        if (block.parentType === 'station') {
+            // 一级块 → 设备上移到站区
+            device.blockId = null;
+        } else {
+            // 子块 → 设备上移到父块
+            device.blockId = block.parentId;
+            var parentBlock = dataCache.blocks[block.parentId];
+            if (parentBlock && parentBlock.deviceIds.indexOf(deviceId) < 0) {
+                parentBlock.deviceIds.push(deviceId);
+                saveToDB('blocks', parentBlock.id, parentBlock);
+            }
+        }
+        saveToDB('devices', deviceId, device);
+        return true;
+    }
+    window.moveDeviceUpOneLevel = moveDeviceUpOneLevel;
+
+    // 块上移一级
+    function moveBlockUpOneLevel(blockId) {
+        var block = dataCache.blocks[blockId];
+        if (!block) return false;
+        if (block.parentType !== 'block') return false;
+
+        var parentBlock = dataCache.blocks[block.parentId];
+        if (!parentBlock) return false;
+
+        block.parentType = parentBlock.parentType;
+        block.parentId = parentBlock.parentId;
+        saveToDB('blocks', blockId, block);
+        return true;
+    }
+    window.moveBlockUpOneLevel = moveBlockUpOneLevel;
+
+    // 单个设备上移一级（带确认）
+    function singleDeviceMoveUp(deviceId) {
+        var device = getDevice(deviceId);
+        if (!device || !device.blockId) { alert('设备已在最顶层，无法上移'); return; }
+        var block = getBlockById(device.blockId);
+        var parentName = '';
+        if (block && block.parentType === 'station') {
+            var st = getStationById(block.parentId);
+            parentName = st ? st.name : '站区';
+        } else if (block) {
+            var pb = getBlockById(block.parentId);
+            parentName = pb ? pb.name : '父块';
+        }
+        if (!confirm('确定将设备「' + device.name + '」上移到「' + parentName + '」？')) return;
+        if (moveDeviceUpOneLevel(deviceId)) {
+            showToast('✓ 已上移：' + device.name);
+            if (currentBlockId) { openBlock(currentBlockId); } else { openStation(currentStationId, currentStationName); }
+        }
+    }
+    window.singleDeviceMoveUp = singleDeviceMoveUp;
+
+    // 单个块上移一级（带确认）
+    function singleBlockMoveUp(blockId) {
+        var block = getBlockById(blockId);
+        if (!block || block.parentType !== 'block') { alert('块已在最顶层，无法上移'); return; }
+        var parentBlock = getBlockById(block.parentId);
+        var grandparentName = '';
+        if (parentBlock && parentBlock.parentType === 'station') {
+            var st = getStationById(parentBlock.parentId);
+            grandparentName = st ? st.name : '站区';
+        } else if (parentBlock) {
+            var pb = getBlockById(parentBlock.parentId);
+            grandparentName = pb ? pb.name : '祖父块';
+        }
+        if (!confirm('确定将块「' + block.name + '」上移到「' + grandparentName + '」？\n块内设备和子块将随之上移。')) return;
+        if (moveBlockUpOneLevel(blockId)) {
+            showToast('✓ 已上移：' + block.name);
+            if (currentBlockId) { openBlock(currentBlockId); } else { openStation(currentStationId, currentStationName); }
+        }
+    }
+    window.singleBlockMoveUp = singleBlockMoveUp;
 
     function getBlockIssueCount(blockId) {
         var count = 0;
@@ -3433,18 +3602,24 @@ function recalcDiseaseCounts(entityId) {
     let lightboxImages = [];
     let lightboxIndex = 0;
 
+    function isPhotoFile(entry) {
+        return typeof entry === 'string' && /\.(jpg|jpeg|png|webp)$/i.test(entry);
+    }
+
     function showLightboxImage() {
         var img = document.getElementById('lightboxImg');
         var entry = lightboxImages[lightboxIndex];
         if (!entry) { img.src = ''; return; }
         if (typeof entry === 'string' && entry.startsWith('p_')) {
-            // photoId: 异步加载完整图
             img.src = '';
             img.alt = '加载中...';
             loadFullPhoto(entry, function(data) {
                 img.src = data || '';
                 img.alt = '放大照片';
             });
+        } else if (isPhotoFile(entry)) {
+            img.src = 'photos/full/' + entry;
+            img.alt = '放大照片';
         } else {
             img.src = entry;
             img.alt = '放大照片';
@@ -3493,6 +3668,10 @@ function recalcDiseaseCounts(entityId) {
         }
         if (typeof entry === 'string' && entry.startsWith('p_')) {
             loadFullPhoto(entry, function(data) { doDownload(data); });
+        } else if (isPhotoFile(entry)) {
+            fetch('photos/full/' + entry).then(function(r) { return r.blob(); }).then(function(blob) {
+                doDownload(URL.createObjectURL(blob));
+            }).catch(function() { showToast('下载失败，请长按图片保存'); });
         } else {
             doDownload(entry);
         }
@@ -5291,14 +5470,21 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     html += `
                         <div class="photo-item" draggable="true" data-photo-idx="${idx}" data-device-id="${ssId}">
                             <div class="lazy-thumb" data-photo-id="${p}" onclick="openLightbox(devicePhotosList, ${idx})">📷</div>
-                            <button class="delete-btn" onclick="event.stopPropagation(); removeDevicePhoto('${ssId}', ${idx})">×</button>
+                            <button class="delete-btn view-hide" onclick="event.stopPropagation(); removeDevicePhoto('${ssId}', ${idx})">×</button>
                         </div>
                     `;
                 } else if (typeof p === 'string' && p.startsWith('data:image')) {
                     html += `
                         <div class="photo-item" draggable="true" data-photo-idx="${idx}" data-device-id="${ssId}">
                             <img src="${p}" alt="照片" onclick="openLightbox(devicePhotosList, ${idx})" />
-                            <button class="delete-btn" onclick="event.stopPropagation(); removeDevicePhoto('${ssId}', ${idx})">×</button>
+                            <button class="delete-btn view-hide" onclick="event.stopPropagation(); removeDevicePhoto('${ssId}', ${idx})">×</button>
+                        </div>
+                    `;
+                } else if (isPhotoFile(p)) {
+                    html += `
+                        <div class="photo-item" data-photo-idx="${idx}" data-device-id="${ssId}">
+                            <img src="photos/thumbs/${p}" alt="照片" loading="lazy" onclick="openLightbox(devicePhotosList, ${idx})" />
+                            <button class="delete-btn view-hide" onclick="event.stopPropagation(); removeDevicePhoto('${ssId}', ${idx})">×</button>
                         </div>
                     `;
                 }
@@ -5355,6 +5541,8 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             problemThumbsHtml += `<div class="mini-thumb lazy-thumb" data-photo-id="${images[i]}" onclick="openLightbox(issueImagesMap[${idx}], ${i})">📷</div>`;
                         } else if (typeof images[i] === 'string' && images[i].startsWith('data:image')) {
                             problemThumbsHtml += `<img class="mini-thumb" src="${images[i]}" onclick="openLightbox(issueImagesMap[${idx}], ${i})" />`;
+                        } else if (isPhotoFile(images[i])) {
+                            problemThumbsHtml += `<img class="mini-thumb" src="photos/thumbs/${images[i]}" loading="lazy" onclick="openLightbox(issueImagesMap[${idx}], ${i})" />`;
                         }
                     }
                     problemThumbsHtml += `</div></div>`;
@@ -5368,6 +5556,8 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             repairThumbsHtml += `<div class="mini-thumb lazy-thumb" data-photo-id="${repairPhotos[j]}" onclick="openLightbox(issueRepairPhotosMap[${idx}], ${j})">📷</div>`;
                         } else if (typeof repairPhotos[j] === 'string' && repairPhotos[j].startsWith('data:image')) {
                             repairThumbsHtml += `<img class="mini-thumb" src="${repairPhotos[j]}" onclick="openLightbox(issueRepairPhotosMap[${idx}], ${j})" />`;
+                        } else if (isPhotoFile(repairPhotos[j])) {
+                            repairThumbsHtml += `<img class="mini-thumb" src="photos/thumbs/${repairPhotos[j]}" loading="lazy" onclick="openLightbox(issueRepairPhotosMap[${idx}], ${j})" />`;
                         }
                     }
                     repairThumbsHtml += `</div></div>`;
@@ -5375,16 +5565,20 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
 
                 var thumbHtml = `<span>📄</span>`;
                 var thumbOnclick = '';
-                if (images.length > 0 && typeof images[0] === 'string' && (images[0].startsWith('p_') || images[0].startsWith('data:image'))) {
+                if (images.length > 0 && typeof images[0] === 'string' && (images[0].startsWith('p_') || images[0].startsWith('data:image') || isPhotoFile(images[0]))) {
                     if (images[0].startsWith('p_')) {
                         thumbHtml = `<div class="lazy-thumb" data-photo-id="${images[0]}" style="width:100%;height:100%;">📷</div>`;
+                    } else if (isPhotoFile(images[0])) {
+                        thumbHtml = `<img src="photos/thumbs/${images[0]}" alt="问题照片" loading="lazy" />`;
                     } else {
                         thumbHtml = `<img src="${images[0]}" alt="问题照片" />`;
                     }
                     thumbOnclick = `openLightbox(issueImagesMap[${idx}], 0)`;
-                } else if (repairPhotos.length > 0 && typeof repairPhotos[0] === 'string' && (repairPhotos[0].startsWith('p_') || repairPhotos[0].startsWith('data:image'))) {
+                } else if (repairPhotos.length > 0 && typeof repairPhotos[0] === 'string' && (repairPhotos[0].startsWith('p_') || repairPhotos[0].startsWith('data:image') || isPhotoFile(repairPhotos[0]))) {
                     if (repairPhotos[0].startsWith('p_')) {
                         thumbHtml = `<div class="lazy-thumb" data-photo-id="${repairPhotos[0]}" style="width:100%;height:100%;">📷</div>`;
+                    } else if (isPhotoFile(repairPhotos[0])) {
+                        thumbHtml = `<img src="photos/thumbs/${repairPhotos[0]}" alt="整治照片" loading="lazy" />`;
                     } else {
                         thumbHtml = `<img src="${repairPhotos[0]}" alt="整治照片" />`;
                     }
@@ -5476,6 +5670,8 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             problemThumbsHtml2 += '<div class="lazy-thumb" data-photo-id="' + pid + '" style="width:50px;height:50px;border-radius:6px;overflow:hidden;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueImagesMap[' + idx + '],' + pi + ')">📷</div>';
                         } else if (typeof pid === 'string' && pid.startsWith('data:image')) {
                             problemThumbsHtml2 += '<img src="' + pid + '" style="width:50px;height:50px;border-radius:6px;object-fit:cover;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueImagesMap[' + idx + '],' + pi + ')" />';
+                        } else if (isPhotoFile(pid)) {
+                            problemThumbsHtml2 += '<img src="photos/thumbs/' + pid + '" loading="lazy" style="width:50px;height:50px;border-radius:6px;object-fit:cover;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueImagesMap[' + idx + '],' + pi + ')" />';
                         }
                     });
                     problemThumbsHtml2 += '</div>';
@@ -5488,6 +5684,8 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             repairThumbsHtml2 += '<div class="lazy-thumb" data-photo-id="' + pid + '" style="width:50px;height:50px;border-radius:6px;overflow:hidden;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueRepairPhotosMap[' + idx + '],' + pi + ')">📷</div>';
                         } else if (typeof pid === 'string' && pid.startsWith('data:image')) {
                             repairThumbsHtml2 += '<img src="' + pid + '" style="width:50px;height:50px;border-radius:6px;object-fit:cover;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueRepairPhotosMap[' + idx + '],' + pi + ')" />';
+                        } else if (isPhotoFile(pid)) {
+                            repairThumbsHtml2 += '<img src="photos/thumbs/' + pid + '" loading="lazy" style="width:50px;height:50px;border-radius:6px;object-fit:cover;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueRepairPhotosMap[' + idx + '],' + pi + ')" />';
                         }
                     });
                     repairThumbsHtml2 += '</div>';
@@ -5651,6 +5849,8 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                         <button class="btn btn-sm" id="batchSelectAllBtn" onclick="toggleSelectAll()" style="font-size:0.8rem;display:none;background:#6b8a7d;color:#fff;border:1px solid #6b8a7d;">☑️ 全选</button>
                         <button class="btn btn-sm" id="batchMoveBtn" onclick="openBatchMoveModal()" style="font-size:0.8rem;display:none;background:#5b9a7d;color:#fff;border:1px solid #5b9a7d;">📦 移动到房屋</button>
                         <button class="btn btn-sm" id="batchMoveBlockBtn" onclick="openBatchMoveBlockModal()" style="font-size:0.8rem;display:none;background:#5b9a7d;color:#fff;border:1px solid #5b9a7d;">📦 移到块</button>
+                        <button class="btn btn-sm" id="batchMoveToStationBtn" onclick="openBatchMoveBlockToStationModal()" style="font-size:0.8rem;display:none;background:#5b9a7d;color:#fff;border:1px solid #5b9a7d;">🚚 移到其他站</button>
+                        <button class="btn btn-sm" id="batchMoveUpBtn" onclick="batchMoveUpOneLevel()" style="font-size:0.8rem;display:none;background:#6b8a7d;color:#fff;border:1px solid #6b8a7d;">⬆ 上移一级</button>
                         <button class="btn btn-sm" id="batchDeleteBtn" onclick="batchDeleteDevices()" style="font-size:0.8rem;display:none;background:#c44;color:#fff;border:1px solid #c44;">🗑️ 批量删除</button>
                         <button class="btn btn-sm" id="batchCancelBtn" onclick="exitBatchMode()" style="font-size:0.8rem;display:none;">退出批量</button>
                     </div>
@@ -5670,6 +5870,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var b = item.data;
                     var counts = getBlockDeviceCounts(b.id);
                     var issueCnt = getBlockIssueCount(b.id);
+                    var childBlocks = getBlocksByParent('block', b.id);
                     var bDisease = blockHasDisease(b.id);
                     var bDiseaseStyle = bDisease ? ' style="background:linear-gradient(135deg,#fff0e0,#ffd8a8);border:2px solid #ff6a00;box-shadow:0 4px 20px rgba(255,106,0,0.25);position:relative;overflow:hidden;"' : ' style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);"';
                     html += `
@@ -5679,7 +5880,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             <button class="card-rename-btn" onclick="event.stopPropagation(); renameBlock('${b.id}')" title="重命名">✏</button>
                             <span class="emoji">📦</span>
                             <div class="name">${b.name}</div>
-                            <div class="sub">块 · 可拖拽排序</div>
+                            <div class="sub">块${childBlocks.length > 0 ? ' · 有子块' : ''} · 可拖拽排序</div>
                             <div class="badge-count">🏠 ${counts.houses} · 🏗️ ${counts.structs}</div>
                             ${issueCnt > 0 ? '<div class="badge-count danger">📋 ' + issueCnt + ' 条问题</div>' : ''}
                             <button class="view-btn" onclick="event.stopPropagation(); openBlock('${b.id}')">进入</button>
@@ -5755,6 +5956,10 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             document.getElementById('batchCancelBtn').style.display = '';
             var batchMoveBlockBtn = document.getElementById('batchMoveBlockBtn');
             if (batchMoveBlockBtn) batchMoveBlockBtn.style.display = '';
+            var batchMoveToStationBtn = document.getElementById('batchMoveToStationBtn');
+            if (batchMoveToStationBtn) batchMoveToStationBtn.style.display = '';
+            var batchMoveUpBtn = document.getElementById('batchMoveUpBtn');
+            if (batchMoveUpBtn) batchMoveUpBtn.style.display = '';
             updateSelectAllBtnText();
             document.querySelectorAll('#deviceGrid .card').forEach(function(card) {
                 card.classList.add('batch-selectable');
@@ -5778,6 +5983,10 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             document.getElementById('batchCancelBtn').style.display = 'none';
             var batchMoveBlockBtn = document.getElementById('batchMoveBlockBtn');
             if (batchMoveBlockBtn) batchMoveBlockBtn.style.display = 'none';
+            var batchMoveToStationBtn = document.getElementById('batchMoveToStationBtn');
+            if (batchMoveToStationBtn) batchMoveToStationBtn.style.display = 'none';
+            var batchMoveUpBtn = document.getElementById('batchMoveUpBtn');
+            if (batchMoveUpBtn) batchMoveUpBtn.style.display = 'none';
             document.querySelectorAll('#deviceGrid .card').forEach(function(card) {
                 card.classList.remove('batch-selectable', 'batch-selected');
                 card.removeEventListener('click', batchCardClickHandler, true);
@@ -5934,6 +6143,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             if (blocksWithMatch[blockId]) show = true;
                         } else {
                             if (name.toLowerCase().indexOf(val) >= 0) show = true;
+                            if (c.dataset.deviceId && matchedDeviceIds[c.dataset.deviceId]) show = true;
                         }
                         if (show) { c.style.display = ''; count++; }
                         else { c.style.display = 'none'; }
@@ -5957,7 +6167,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                         hiddenMatches = hiddenMatches.filter(function(d) { return !visibleIds[d.id]; });
 
                         if (hiddenMatches.length > 0) {
-                            var extraHtml = '<div style="grid-column:1/-1;font-size:0.8rem;color:#4f7062;padding:0.6rem 0.4rem;border-top:1px dashed #c4d8ce;margin-top:0.5rem;">📍 以下设备在块/子块内：</div>';
+                            var extraHtml = '<div style="grid-column:1/-1;font-size:0.8rem;color:#4f7062;padding:0.6rem 0.4rem;border-top:1px dashed #c4d8ce;margin-top:0.5rem;">📍 以下设备在块内：</div>';
                             hiddenMatches.forEach(function(d) {
                                 var emoji = d.type === '房屋' ? '🏠' : '🏗️';
                                 var path = [];
@@ -6152,7 +6362,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             <div class="detail-card">
                 <div class="detail-header">
                     <h2>📦 ${block.name}</h2>
-                    <span style="font-size:0.85rem;color:#4f7062;">${currentBlockDepth > 0 ? '子块' : '块'}</span>
+                    <span style="font-size:0.85rem;color:#4f7062;">${currentBlockDepth === 0 ? '块' : currentBlockDepth === 1 ? '子块' : '小子块'}</span>
                 </div>
                 <div class="search-box" id="stationSearch">
                     <input type="text" id="stationSearchInput" placeholder="🔍 搜索设备名称或台账尾号..." autocomplete="off" />
@@ -6160,16 +6370,19 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                 </div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;flex-wrap:wrap;gap:0.5rem;">
                     <div style="font-size:0.85rem;color:#4f7062;">
-                        共 <span id="deviceCount">${totalDeviceCount + totalBlockCount}</span> 个（🏠 ${houseCount}房屋 · 🏗️ ${structCount}构筑物${totalBlockCount > 0 ? ' · 📦 ' + totalBlockCount + '子块' : ''}）
+                        共 <span id="deviceCount">${totalDeviceCount + totalBlockCount}</span> 个（🏠 ${houseCount}房屋 · 🏗️ ${structCount}构筑物${totalBlockCount > 0 ? ' · 📦 ' + totalBlockCount + (currentBlockDepth === 0 ? '子块' : '小子块') : ''}）
                     </div>
                     <div style="display:flex;gap:0.4rem;flex-wrap:wrap;" class="view-hide">
                         <button class="btn btn-sm" onclick="openAddDeviceFromLedgerModal()" style="font-size:0.8rem;">📥 从台账添加</button>
                         <button class="btn btn-sm" onclick="openAddDeviceModal()" style="font-size:0.8rem;">➕ 手动新增</button>
-                        ${currentBlockDepth < 1 ? '<button class="btn btn-sm" onclick="openAddBlockModal()" style="font-size:0.8rem;">📦 新建子块</button><button class="btn btn-sm btn-outline" onclick="openImportBlockModal()" style="font-size:0.8rem;">📋 批量导入子块</button>' : ''}
+                        ${currentBlockDepth < 2 ? '<button class="btn btn-sm" onclick="openAddBlockModal()" style="font-size:0.8rem;">📦 新建' + (currentBlockDepth === 0 ? '子块' : '小子块') + '</button><button class="btn btn-sm btn-outline" onclick="openImportBlockModal()" style="font-size:0.8rem;">📋 批量导入' + (currentBlockDepth === 0 ? '子块' : '小子块') + '</button>' : ''}
+                        ${currentBlockDepth === 0 ? '<button class="btn btn-sm btn-outline" onclick="openMoveBlockToStationModal(\'' + block.id + '\')" style="font-size:0.8rem;">🚚 移到其他站</button>' : ''}
                         <button class="btn btn-sm" id="batchOpToggleBtn" onclick="enterBatchMode()" style="font-size:0.8rem;">☑️ 批量操作</button>
                         <button class="btn btn-sm" id="batchSelectAllBtn" onclick="toggleSelectAll()" style="font-size:0.8rem;display:none;background:#6b8a7d;color:#fff;border:1px solid #6b8a7d;">☑️ 全选</button>
                         <button class="btn btn-sm" id="batchMoveBtn" onclick="openBatchMoveModal()" style="font-size:0.8rem;display:none;background:#5b9a7d;color:#fff;border:1px solid #5b9a7d;">📦 移动到房屋</button>
                         <button class="btn btn-sm" id="batchMoveBlockBtn" onclick="openBatchMoveBlockModal()" style="font-size:0.8rem;display:none;background:#5b9a7d;color:#fff;border:1px solid #5b9a7d;">📦 移到块</button>
+                        <button class="btn btn-sm" id="batchMoveToStationBtn" onclick="openBatchMoveBlockToStationModal()" style="font-size:0.8rem;display:none;background:#5b9a7d;color:#fff;border:1px solid #5b9a7d;">🚚 移到其他站</button>
+                        <button class="btn btn-sm" id="batchMoveUpBtn" onclick="batchMoveUpOneLevel()" style="font-size:0.8rem;display:none;background:#6b8a7d;color:#fff;border:1px solid #6b8a7d;">⬆ 上移一级</button>
                         <button class="btn btn-sm" id="batchDeleteBtn" onclick="batchDeleteDevices()" style="font-size:0.8rem;display:none;background:#c44;color:#fff;border:1px solid #c44;">🗑️ 批量删除</button>
                         <button class="btn btn-sm" id="batchCancelBtn" onclick="exitBatchMode()" style="font-size:0.8rem;display:none;">退出批量</button>
                     </div>
@@ -6200,10 +6413,13 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             <button class="card-rename-btn" onclick="event.stopPropagation(); renameBlock('${b.id}')" title="重命名">✏</button>
                             <span class="emoji">📦</span>
                             <div class="name">${b.name}</div>
-                            <div class="sub">块${childBlocks.length > 0 ? ' · 有子块' : ''} · 可拖拽排序</div>
+                            <div class="sub">${currentBlockDepth === 0 ? '子块' : '小子块'}${childBlocks.length > 0 ? ' · 有' + (currentBlockDepth === 0 ? '小子块' : '子块') : ''} · 可拖拽排序</div>
                             <div class="badge-count">🏠 ${counts.houses} · 🏗️ ${counts.structs}</div>
                             ${issueCnt > 0 ? '<div class="badge-count danger">📋 ' + issueCnt + ' 条问题</div>' : ''}
-                            <button class="view-btn" onclick="event.stopPropagation(); openBlock('${b.id}')">进入</button>
+                            <div style="display:flex;gap:0.3rem;margin-top:0.5rem;">
+                                <button class="view-btn" style="flex:1;" onclick="event.stopPropagation(); openBlock('${b.id}')">进入</button>
+                                <button class="view-btn" style="flex:1;background:#6b8a7d;color:#fff;border-color:#6b8a7d;" onclick="event.stopPropagation(); singleBlockMoveUp('${b.id}')" title="上移一级">⬆ 上移</button>
+                            </div>
                         </div>
                     `;
                 } else {
@@ -6228,7 +6444,10 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             ${d.address ? '<div class="addr">\u{1F4CD} ' + d.address + '</div>' : ''}
                             <div class="badge-count ${hasIssues ? 'danger' : ''}">${issues.length} 条记录</div>
                         ${isHouse && d.subStructures && d.subStructures.length > 0 ? `<div class="badge-count" style="background:#e8f0eb;color:#3a7a62;">🏗️ ${getSubStructuresByDevice(d.id).length}个附属构筑物</div>` : ''}
-                            <button class="view-btn" onclick="event.stopPropagation(); openDevice('${d.id}')">查看</button>
+                            <div style="display:flex;gap:0.3rem;margin-top:0.5rem;">
+                                <button class="view-btn" style="flex:1;" onclick="event.stopPropagation(); openDevice('${d.id}')">查看</button>
+                                <button class="view-btn" style="flex:1;background:#6b8a7d;color:#fff;border-color:#6b8a7d;" onclick="event.stopPropagation(); singleDeviceMoveUp('${d.id}')" title="上移一级">⬆ 上移</button>
+                            </div>
                         </div>
                     `;
                 }
@@ -6504,9 +6723,9 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                         break;
                     }
                     var sbDepth = getBlockDepth(sbId);
-                    if (targetDepth + 1 + sbDepth > 1) {
+                    if (targetDepth + 1 + sbDepth > 2) {
                         canMoveBlocks = false;
-                        reason = '超过两层嵌套限制';
+                        reason = '超过三层嵌套限制';
                         break;
                     }
                     // 检查目标块是否在被移动块内部
@@ -6575,6 +6794,149 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
     }
     window.batchMoveToBlock = batchMoveToBlock;
 
+    function batchMoveUpOneLevel() {
+        var hasDevices = batchSelectedIds.length > 0;
+        var hasBlocks = batchSelectedBlockIds.length > 0;
+        if (!hasDevices && !hasBlocks) { alert('请先选择要上移的设备或块'); return; }
+
+        if (!currentBlockId && !hasBlocks) { alert('设备已在站区最顶层，无法继续上移'); return; }
+
+        var msgParts = [];
+        if (hasDevices) msgParts.push(batchSelectedIds.length + ' 个设备');
+        if (hasBlocks) msgParts.push(batchSelectedBlockIds.length + ' 个块');
+
+        if (!confirm('确定将选中的 ' + msgParts.join('和') + '上移一级？')) return;
+
+        var idsToMove = batchSelectedIds.slice();
+        var blockIdsToMove = batchSelectedBlockIds.slice();
+        batchSelectedIds = [];
+        batchSelectedBlockIds = [];
+        exitBatchMode();
+
+        var movedDevices = 0;
+        var movedBlocks = 0;
+        idsToMove.forEach(function(did) {
+            if (moveDeviceUpOneLevel(did)) movedDevices++;
+        });
+        blockIdsToMove.forEach(function(bid) {
+            if (moveBlockUpOneLevel(bid)) movedBlocks++;
+        });
+
+        var msg = '✓ 已上移';
+        if (movedDevices > 0) msg += ' ' + movedDevices + ' 个设备';
+        if (movedBlocks > 0) msg += (movedDevices > 0 ? '、' : ' ') + movedBlocks + ' 个块';
+        showToast(msg);
+
+        if (currentBlockId) { openBlock(currentBlockId); } else { openStation(currentStationId, currentStationName); }
+    }
+    window.batchMoveUpOneLevel = batchMoveUpOneLevel;
+
+    // 单个块移到其他站
+    function openMoveBlockToStationModal(blockId) {
+        var block = getBlockById(blockId);
+        if (!block) return;
+        var stations = dataCache.stations || [];
+        var curStationId = null;
+        var cur = block;
+        while (cur) {
+            if (cur.parentType === 'station') { curStationId = cur.parentId; break; }
+            cur = dataCache.blocks[cur.parentId];
+        }
+        var otherStations = stations.filter(function(s) { return s.id !== curStationId; });
+        if (otherStations.length === 0) { alert('没有其他站可迁移'); return; }
+
+        var modal = document.getElementById('moveBlockToStationModal');
+        var list = document.getElementById('moveBlockToStationList');
+        var tip = document.getElementById('moveBlockToStationTip');
+        var counts = getBlockDeviceCounts(blockId);
+        var childBlocks = getBlocksByParent('block', blockId);
+        tip.textContent = '块「' + block.name + '」（含 ' + childBlocks.length + ' 子块、' + counts.houses + ' 房屋、' + counts.structs + ' 构筑物）将整体迁移到目标站：';
+
+        var html = '';
+        otherStations.forEach(function(s) {
+            var sCounts = getRecursiveCounts('station', s.id);
+            html += '<div class="import-result-item" onclick="doMoveBlockToStation(\'' + blockId + '\',\'' + s.id + '\')" style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.8rem;cursor:pointer;">';
+            html += '<span style="font-size:1.2rem;">📍</span>';
+            html += '<div style="flex:1;"><div style="font-weight:600;color:#1a3a30;">' + (s.name || '') + '</div>';
+            html += '<div style="font-size:0.78rem;color:#7a9a8a;">🏠 ' + sCounts.houseCount + ' · 🏗️ ' + sCounts.structCount + ' · 📦 ' + sCounts.blockCount + ' 块</div></div>';
+            html += '<div style="font-size:0.78rem;color:#4a7d66;">迁移 →</div>';
+            html += '</div>';
+        });
+        list.innerHTML = html;
+        modal.classList.add('active');
+    }
+    window.openMoveBlockToStationModal = openMoveBlockToStationModal;
+
+    function doMoveBlockToStation(blockId, targetStationId) {
+        var block = getBlockById(blockId);
+        var targetStation = dataCache.stations.find(function(s) { return s.id === targetStationId; });
+        if (!block || !targetStation) return;
+        if (!confirm('确定将块「' + block.name + '」整体迁移到「' + targetStation.name + '」吗？\n\n块内所有子块、设备、问题和照片都会一起搬走。')) return;
+
+        var result = moveBlockToStation(blockId, targetStationId);
+        document.getElementById('moveBlockToStationModal').classList.remove('active');
+        if (result && result.success) {
+            showToast('✓ 已迁移 ' + result.blockCount + ' 个块、' + result.deviceCount + ' 个设备到「' + targetStation.name + '」');
+            openStation(currentStationId, currentStationName);
+        } else {
+            alert('迁移失败');
+        }
+    }
+    window.doMoveBlockToStation = doMoveBlockToStation;
+
+    // 批量移动块到其他站
+    function openBatchMoveBlockToStationModal() {
+        if (batchSelectedBlockIds.length === 0) { alert('请先选择块'); return; }
+        var stations = dataCache.stations || [];
+        var otherStations = stations.filter(function(s) { return s.id !== currentStationId; });
+        if (otherStations.length === 0) { alert('没有其他站可迁移'); return; }
+
+        var modal = document.getElementById('moveBlockToStationModal');
+        var list = document.getElementById('moveBlockToStationList');
+        var tip = document.getElementById('moveBlockToStationTip');
+        tip.textContent = '已选 ' + batchSelectedBlockIds.length + ' 个块，选择目标站：';
+
+        var html = '';
+        otherStations.forEach(function(s) {
+            var sCounts = getRecursiveCounts('station', s.id);
+            html += '<div class="import-result-item" onclick="doBatchMoveBlockToStation(\'' + s.id + '\')" style="display:flex;align-items:center;gap:0.5rem;padding:0.6rem 0.8rem;cursor:pointer;">';
+            html += '<span style="font-size:1.2rem;">📍</span>';
+            html += '<div style="flex:1;"><div style="font-weight:600;color:#1a3a30;">' + (s.name || '') + '</div>';
+            html += '<div style="font-size:0.78rem;color:#7a9a8a;">🏠 ' + sCounts.houseCount + ' · 🏗️ ' + sCounts.structCount + ' · 📦 ' + sCounts.blockCount + ' 块</div></div>';
+            html += '<div style="font-size:0.78rem;color:#4a7d66;">迁移 →</div>';
+            html += '</div>';
+        });
+        list.innerHTML = html;
+        modal.classList.add('active');
+    }
+    window.openBatchMoveBlockToStationModal = openBatchMoveBlockToStationModal;
+
+    function doBatchMoveBlockToStation(targetStationId) {
+        var targetStation = dataCache.stations.find(function(s) { return s.id === targetStationId; });
+        if (!targetStation) return;
+        var blockIds = batchSelectedBlockIds.slice();
+        if (!confirm('确定将选中的 ' + blockIds.length + ' 个块迁移到「' + targetStation.name + '」吗？\n\n块内所有子块、设备、问题和照片都会一起搬走。')) return;
+
+        batchSelectedIds = [];
+        batchSelectedBlockIds = [];
+        exitBatchMode();
+
+        var totalBlocks = 0;
+        var totalDevices = 0;
+        blockIds.forEach(function(bid) {
+            var r = moveBlockToStation(bid, targetStationId);
+            if (r && r.success) {
+                totalBlocks += r.blockCount;
+                totalDevices += r.deviceCount;
+            }
+        });
+
+        document.getElementById('moveBlockToStationModal').classList.remove('active');
+        showToast('✓ 已迁移 ' + totalBlocks + ' 个块、' + totalDevices + ' 个设备到「' + targetStation.name + '」');
+        openStation(currentStationId, currentStationName);
+    }
+    window.doBatchMoveBlockToStation = doBatchMoveBlockToStation;
+
     function setupStationPageEvents(contextBlock, stationId) {
         // 卡片点击
         document.querySelectorAll('#deviceGrid .card').forEach(card => {
@@ -6630,6 +6992,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             if (blocksWithMatch[blockId]) show = true;
                         } else {
                             if (name.toLowerCase().indexOf(val) >= 0) show = true;
+                            if (c.dataset.deviceId && matchedDeviceIds[c.dataset.deviceId]) show = true;
                         }
                         if (show) { c.style.display = ''; count++; }
                         else { c.style.display = 'none'; }
@@ -6709,6 +7072,8 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             var bsa = document.getElementById('batchSelectAllBtn'); if (bsa) bsa.style.display = '';
             var bm = document.getElementById('batchMoveBtn'); if (bm) bm.style.display = '';
             var bmb = document.getElementById('batchMoveBlockBtn'); if (bmb) bmb.style.display = '';
+            var bmts = document.getElementById('batchMoveToStationBtn'); if (bmts) bmts.style.display = '';
+            var bmu = document.getElementById('batchMoveUpBtn'); if (bmu) bmu.style.display = '';
             var bd = document.getElementById('batchDeleteBtn'); if (bd) bd.style.display = '';
             var bc = document.getElementById('batchCancelBtn'); if (bc) bc.style.display = '';
             updateSelectAllBtnText();
@@ -6731,6 +7096,8 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             var bsa = document.getElementById('batchSelectAllBtn'); if (bsa) bsa.style.display = 'none';
             var bm = document.getElementById('batchMoveBtn'); if (bm) bm.style.display = 'none';
             var bmb = document.getElementById('batchMoveBlockBtn'); if (bmb) bmb.style.display = 'none';
+            var bmts = document.getElementById('batchMoveToStationBtn'); if (bmts) bmts.style.display = 'none';
+            var bmu = document.getElementById('batchMoveUpBtn'); if (bmu) bmu.style.display = 'none';
             var bd = document.getElementById('batchDeleteBtn'); if (bd) bd.style.display = 'none';
             var bc = document.getElementById('batchCancelBtn'); if (bc) bc.style.display = 'none';
             document.querySelectorAll('#deviceGrid .card').forEach(function(card) {
@@ -7119,7 +7486,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     html += `
                         <div class="photo-item" draggable="true" data-photo-idx="${idx}" data-device-id="${deviceId}">
                             <div class="lazy-thumb" data-photo-id="${p}" onclick="openLightbox(devicePhotosList, ${idx})">📷</div>
-                            <button class="delete-btn" onclick="event.stopPropagation(); removeDevicePhoto('${deviceId}', ${idx})">×</button>
+                            <button class="delete-btn view-hide" onclick="event.stopPropagation(); removeDevicePhoto('${deviceId}', ${idx})">×</button>
                         </div>
                     `;
                 } else if (typeof p === 'string' && p.startsWith('data:image')) {
@@ -7127,7 +7494,15 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     html += `
                         <div class="photo-item" draggable="true" data-photo-idx="${idx}" data-device-id="${deviceId}">
                             <img src="${p}" alt="照片" onclick="openLightbox(devicePhotosList, ${idx})" />
-                            <button class="delete-btn" onclick="event.stopPropagation(); removeDevicePhoto('${deviceId}', ${idx})">×</button>
+                            <button class="delete-btn view-hide" onclick="event.stopPropagation(); removeDevicePhoto('${deviceId}', ${idx})">×</button>
+                        </div>
+                    `;
+                } else if (isPhotoFile(p)) {
+                    // 文件路径照片：从 photos/thumbs/ 加载缩略图
+                    html += `
+                        <div class="photo-item" data-photo-idx="${idx}" data-device-id="${deviceId}">
+                            <img src="photos/thumbs/${p}" alt="照片" loading="lazy" onclick="openLightbox(devicePhotosList, ${idx})" />
+                            <button class="delete-btn view-hide" onclick="event.stopPropagation(); removeDevicePhoto('${deviceId}', ${idx})">×</button>
                         </div>
                     `;
                 } else {
@@ -7135,7 +7510,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     html += `
                         <div class="photo-item" draggable="true" data-photo-idx="${idx}" data-device-id="${deviceId}">
                             <div class="placeholder">📷 ${p}</div>
-                            <button class="delete-btn" onclick="event.stopPropagation(); removeDevicePhoto('${deviceId}', ${idx})">×</button>
+                            <button class="delete-btn view-hide" onclick="event.stopPropagation(); removeDevicePhoto('${deviceId}', ${idx})">×</button>
                         </div>
                     `;
                 }
@@ -7319,6 +7694,8 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             problemThumbsHtml2 += '<div class="lazy-thumb" data-photo-id="' + pid + '" style="width:50px;height:50px;border-radius:6px;overflow:hidden;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueImagesMap[' + idx + '],' + pi + ')">📷</div>';
                         } else if (typeof pid === 'string' && pid.startsWith('data:image')) {
                             problemThumbsHtml2 += '<img src="' + pid + '" style="width:50px;height:50px;border-radius:6px;object-fit:cover;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueImagesMap[' + idx + '],' + pi + ')" />';
+                        } else if (isPhotoFile(pid)) {
+                            problemThumbsHtml2 += '<img src="photos/thumbs/' + pid + '" loading="lazy" style="width:50px;height:50px;border-radius:6px;object-fit:cover;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueImagesMap[' + idx + '],' + pi + ')" />';
                         }
                     });
                     problemThumbsHtml2 += '</div>';
@@ -7331,6 +7708,8 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             repairThumbsHtml2 += '<div class="lazy-thumb" data-photo-id="' + pid + '" style="width:50px;height:50px;border-radius:6px;overflow:hidden;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueRepairPhotosMap[' + idx + '],' + pi + ')">📷</div>';
                         } else if (typeof pid === 'string' && pid.startsWith('data:image')) {
                             repairThumbsHtml2 += '<img src="' + pid + '" style="width:50px;height:50px;border-radius:6px;object-fit:cover;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueRepairPhotosMap[' + idx + '],' + pi + ')" />';
+                        } else if (isPhotoFile(pid)) {
+                            repairThumbsHtml2 += '<img src="photos/thumbs/' + pid + '" loading="lazy" style="width:50px;height:50px;border-radius:6px;object-fit:cover;cursor:pointer;" onclick="event.stopPropagation();openLightbox(issueRepairPhotosMap[' + idx + '],' + pi + ')" />';
                         }
                     });
                     repairThumbsHtml2 += '</div>';
