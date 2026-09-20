@@ -1,58 +1,54 @@
-// Service Worker - 离线缓存
-const CACHE_NAME = 'gyfj-ledger-v2';
+const CACHE_NAME = 'asset-tracker-v2';
 const ASSETS = [
-    './',
-    './index.html',
-    './manifest.json',
-    './seed-data.json',
-    './icon-192.png',
-    './icon-512.png',
-    './使用说明.html'
+  './',
+  './index.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png'
 ];
 
-self.addEventListener('install', (event) => {
-    self.skipWaiting();
-    event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => {
-            return Promise.all(
-                ASSETS.map((url) => {
-                    return cache.add(url).catch(() => {
-                        console.log('缓存失败:', url);
-                    });
-                })
-            );
-        })
-    );
+// 安装：缓存核心文件
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => {
+      return cache.addAll(ASSETS);
+    })
+  );
+  self.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => {
-    event.waitUntil(
-        caches.keys().then((keys) => {
-            return Promise.all(
-                keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-            );
-        }).then(() => {
-            return self.clients.claim();
-        })
-    );
+// 激活：清理旧缓存
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys => {
+      return Promise.all(
+        keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
+      );
+    })
+  );
+  self.clients.claim();
 });
 
-self.addEventListener('fetch', (event) => {
-    if (event.request.method !== 'GET') return;
-    event.respondWith(
-        caches.match(event.request).then((cached) => {
-            const fetchPromise = fetch(event.request).then((response) => {
-                if (response && response.status === 200 && response.type === 'basic') {
-                    const clone = response.clone();
-                    caches.open(CACHE_NAME).then((cache) => {
-                        cache.put(event.request, clone).catch(() => {});
-                    });
-                }
-                return response;
-            }).catch(() => {
-                return cached;
-            });
-            return cached || fetchPromise;
-        })
-    );
+// 拦截请求：缓存优先，网络回退
+self.addEventListener('fetch', event => {
+  event.respondWith(
+    caches.match(event.request).then(response => {
+      // 缓存里有就直接返回
+      if (response) return response;
+      // 没有就从网络获取
+      return fetch(event.request).then(networkResponse => {
+        // 如果是有效的同源响应，缓存起来
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(event.request, clone);
+          });
+        }
+        return networkResponse;
+      }).catch(() => {
+        // 网络也没有，返回首页（SPA兜底）
+        return caches.match('./index.html');
+      });
+    })
+  );
 });
