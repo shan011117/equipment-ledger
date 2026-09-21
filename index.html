@@ -238,6 +238,29 @@
             cursor: pointer;
             font-family: inherit;
         }
+        .card .copy-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #5b9a7d;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: transform 0.15s;
+            margin-top: 0.4rem;
+        }
+        .card .copy-btn:active { transform: scale(0.85); }
+        .card .card-code {
+            font-size: 0.7rem;
+            color: #4f7062;
+            margin-top: 0.15rem;
+            word-break: break-all;
+        }
         .card.batch-selectable { cursor: pointer; }
         .card.batch-selectable:hover { border-color: #5b9a7d; box-shadow: 0 0 0 2px rgba(91,154,125,0.3); }
         .card.batch-selected { border: 2px solid #5b9a7d !important; box-shadow: 0 0 0 3px rgba(91,154,125,0.3) !important; background: #f0f7f3 !important; }
@@ -4104,6 +4127,20 @@ function recalcDiseaseCounts(entityId) {
     let undoTimer = null;
     let undoFn = null;
 
+    function copyDeviceInfo(name, code) {
+        var text = name + (code ? ' ' + code : '');
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch(e) {}
+        document.body.removeChild(ta);
+        showToast('已复制：' + text);
+    }
+    window.copyDeviceInfo = copyDeviceInfo;
+
     function showToast(msg, fn) {
         const toast = document.getElementById('undoToast');
         document.getElementById('undoToastMsg').textContent = msg;
@@ -4160,6 +4197,7 @@ function recalcDiseaseCounts(entityId) {
         }
 
         function doSwipeBack() {
+            saveScrollBeforeNav();
             if (currentView === 'substruct') {
                 // 附属构筑物 → 返回主设备
                 var ss = currentSubStructId ? getSubStructure(currentSubStructId) : null;
@@ -4328,6 +4366,7 @@ function recalcDiseaseCounts(entityId) {
 
     function goBackFromView() {
         if (currentView === 'home') return;
+        saveScrollBeforeNav();
         if (currentView === 'substruct') {
             var ss = currentSubStructId ? getSubStructure(currentSubStructId) : null;
             if (ss && ss.parentDeviceId) {
@@ -4353,6 +4392,78 @@ function recalcDiseaseCounts(entityId) {
         }
     }
     window.goBackFromView = goBackFromView;
+
+    // ===== 滚动位置记忆 =====
+    var scrollMemory = {};
+    var isRestoring = false;
+
+    function getScrollKey() {
+        switch (currentView) {
+            case 'home': return 'home';
+            case 'station': return 'station:' + currentStationId;
+            case 'block': return 'block:' + currentBlockId;
+            case 'device': return 'device:' + currentDeviceId;
+            case 'substruct': return 'substruct:' + currentSubStructId;
+        }
+        return null;
+    }
+
+    function saveScrollBeforeNav() {
+        if (isRestoring) return;
+        var key = getScrollKey();
+        if (key && window.scrollY > 0) {
+            scrollMemory[key] = window.scrollY;
+        }
+    }
+
+    function restoreScrollY() {
+        var key = getScrollKey();
+        if (!key || scrollMemory[key] === undefined) return;
+        var y = scrollMemory[key];
+        if (y > 0) {
+            requestAnimationFrame(function() {
+                window.scrollTo(0, y);
+                requestAnimationFrame(function() {
+                    window.scrollTo(0, y);
+                });
+            });
+            setTimeout(function() {
+                window.scrollTo(0, y);
+            }, 200);
+        }
+    }
+
+    // 滚动时实时记录位置（rAF 节流）
+    var scrollSavePending = false;
+    window.addEventListener('scroll', function() {
+        if (scrollSavePending) return;
+        scrollSavePending = true;
+        requestAnimationFrame(function() {
+            var key = getScrollKey();
+            if (key && window.scrollY > 0) {
+                scrollMemory[key] = window.scrollY;
+            }
+            scrollSavePending = false;
+        });
+    }, { passive: true });
+
+    window.addEventListener('pagehide', function() {
+        try {
+            var key = getScrollKey();
+            if (key && window.scrollY > 0) scrollMemory[key] = window.scrollY;
+            localStorage.setItem('gyfj_scrollMemory', JSON.stringify(scrollMemory));
+        } catch(e) {}
+    });
+
+    document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden') {
+            try {
+                var key = getScrollKey();
+                if (key && window.scrollY > 0) scrollMemory[key] = window.scrollY;
+                localStorage.setItem('gyfj_scrollMemory', JSON.stringify(scrollMemory));
+            } catch(e) {}
+        }
+    });
 
     // ===== 页面位置记忆 =====
     function saveViewState() {
@@ -4416,6 +4527,7 @@ function recalcDiseaseCounts(entityId) {
                         document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
                         tab.classList.add('active');
                         renderStationGrid(state.lineGroup);
+                        restoreScrollY();
                     }
                 }, 50);
             }
@@ -4427,6 +4539,7 @@ function recalcDiseaseCounts(entityId) {
     }
 
     function goHome() {
+        saveScrollBeforeNav();
         currentView = 'home';
         currentDeviceId = null;
         currentStationName = null;
@@ -4507,6 +4620,7 @@ function recalcDiseaseCounts(entityId) {
         });
 
         renderStationGrid('all');
+        restoreScrollY();
     }
 
     // ===== 标签拖拽排序 =====
@@ -5359,6 +5473,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
     var currentSubStructId = null;
 
     function openSubStructure(ssId) {
+        saveScrollBeforeNav();
         currentSubStructId = ssId;
         currentDeviceId = ssId; // 复用现有函数：issues/photos存储都按ID，不区分设备/附属构筑物
         currentView = 'substruct';
@@ -5731,6 +5846,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             '<span id="bcCurrent">' + ss.name + '</span>';
 
         fillLazyThumbs();
+        restoreScrollY();
     }
 
     // ===== 病害计数 =====
@@ -5804,6 +5920,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             if (found) { stationName = found.name; stationId = found.id; }
             else { alert('站点不存在'); return; }
         }
+        saveScrollBeforeNav();
         currentView = 'station';
         currentStationId = stationId;
         currentStationName = stationName;
@@ -5873,6 +5990,11 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var childBlocks = getBlocksByParent('block', b.id);
                     var bDisease = blockHasDisease(b.id);
                     var bDiseaseStyle = bDisease ? ' style="background:linear-gradient(135deg,#fff0e0,#ffd8a8);border:2px solid #ff6a00;box-shadow:0 4px 20px rgba(255,106,0,0.25);position:relative;overflow:hidden;"' : ' style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);"';
+                    var blockDevices = getDevicesByBlock(b.id);
+                    var singleDeviceCode = '';
+                    if (blockDevices.length === 1 && childBlocks.length === 0) {
+                        singleDeviceCode = blockDevices[0].code || '';
+                    }
                     html += `
                         <div class="card block-card draggable-card${bDisease ? ' has-disease' : ''}" data-block-id="${b.id}" data-device-name="${b.name}"${bDiseaseStyle}>
                             ${bDisease ? '<div style="position:absolute;top:0;left:0;right:0;height:6px;background:linear-gradient(90deg,#ff4400,#ff8800);"></div>' : ''}
@@ -5881,9 +6003,12 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             <span class="emoji">📦</span>
                             <div class="name">${b.name}</div>
                             <div class="sub">块${childBlocks.length > 0 ? ' · 有子块' : ''} · 可拖拽排序</div>
+                            ${singleDeviceCode ? '<div class="card-code">📋 ' + singleDeviceCode + '</div>' : ''}
                             <div class="badge-count">🏠 ${counts.houses} · 🏗️ ${counts.structs}</div>
                             ${issueCnt > 0 ? '<div class="badge-count danger">📋 ' + issueCnt + ' 条问题</div>' : ''}
-                            <button class="view-btn" onclick="event.stopPropagation(); openBlock('${b.id}')">进入</button>
+                            <div style="display:flex;justify-content:flex-end;">
+                                <button class="copy-btn" onclick="event.stopPropagation(); copyDeviceInfo('${b.name.replace(/'/g, "\\'")}','${singleDeviceCode.replace(/'/g, "\\'")}')" title="复制名称和台账号">📋</button>
+                            </div>
                         </div>
                     `;
                 } else {
@@ -5908,7 +6033,9 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             ${d.address ? '<div class="addr">\u{1F4CD} ' + d.address + '</div>' : ''}
                             <div class="badge-count ${hasIssues ? 'danger' : ''}">${issues.length} 条记录</div>
                         ${isHouse && d.subStructures && d.subStructures.length > 0 ? `<div class="badge-count" style="background:#e8f0eb;color:#3a7a62;">🏗️ ${getSubStructuresByDevice(d.id).length}个附属构筑物</div>` : ''}
-                            <button class="view-btn" onclick="event.stopPropagation(); openDevice('${d.id}')">查看</button>
+                            <div style="display:flex;justify-content:flex-end;">
+                                <button class="copy-btn" onclick="event.stopPropagation(); copyDeviceInfo('${d.name.replace(/'/g, "\\'")}','${(d.code || '').replace(/'/g, "\\'")}')" title="复制名称和台账号">📋</button>
+                            </div>
                         </div>
                     `;
                 }
@@ -6328,11 +6455,13 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
             });
             saveItemsOrder(items);
         }
+        restoreScrollY();
     }
 
     function openBlock(blockId) {
         var block = getBlockById(blockId);
         if (!block) { alert('块不存在'); return; }
+        saveScrollBeforeNav();
         currentView = 'block';
         currentBlockId = blockId;
         currentBlockName = block.name;
@@ -6406,6 +6535,11 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                     var childBlocks = getBlocksByParent('block', b.id);
                     var bDisease = blockHasDisease(b.id);
                     var bDiseaseStyle = bDisease ? ' style="background:linear-gradient(135deg,#fff0e0,#ffd8a8);border:2px solid #ff6a00;box-shadow:0 4px 20px rgba(255,106,0,0.25);position:relative;overflow:hidden;"' : ' style="border-color:#c4d8ce;background:linear-gradient(135deg,#f8fcfa,#f0f7f3);"';
+                    var blockDevices = getDevicesByBlock(b.id);
+                    var singleDeviceCode = '';
+                    if (blockDevices.length === 1 && childBlocks.length === 0) {
+                        singleDeviceCode = blockDevices[0].code || '';
+                    }
                     html += `
                         <div class="card block-card draggable-card${bDisease ? ' has-disease' : ''}" data-block-id="${b.id}" data-device-name="${b.name}"${bDiseaseStyle}>
                             ${bDisease ? '<div style="position:absolute;top:0;left:0;right:0;height:6px;background:linear-gradient(90deg,#ff4400,#ff8800);"></div>' : ''}
@@ -6414,11 +6548,12 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             <span class="emoji">📦</span>
                             <div class="name">${b.name}</div>
                             <div class="sub">${currentBlockDepth === 0 ? '子块' : '小子块'}${childBlocks.length > 0 ? ' · 有' + (currentBlockDepth === 0 ? '小子块' : '子块') : ''} · 可拖拽排序</div>
+                            ${singleDeviceCode ? '<div class="card-code">📋 ' + singleDeviceCode + '</div>' : ''}
                             <div class="badge-count">🏠 ${counts.houses} · 🏗️ ${counts.structs}</div>
                             ${issueCnt > 0 ? '<div class="badge-count danger">📋 ' + issueCnt + ' 条问题</div>' : ''}
-                            <div style="display:flex;gap:0.3rem;margin-top:0.5rem;">
-                                <button class="view-btn" style="flex:1;" onclick="event.stopPropagation(); openBlock('${b.id}')">进入</button>
+                            <div style="display:flex;gap:0.3rem;margin-top:0.5rem;align-items:center;">
                                 <button class="view-btn" style="flex:1;background:#6b8a7d;color:#fff;border-color:#6b8a7d;" onclick="event.stopPropagation(); singleBlockMoveUp('${b.id}')" title="上移一级">⬆ 上移</button>
+                                <button class="copy-btn" onclick="event.stopPropagation(); copyDeviceInfo('${b.name.replace(/'/g, "\\'")}','${singleDeviceCode.replace(/'/g, "\\'")}')" title="复制名称和台账号">📋</button>
                             </div>
                         </div>
                     `;
@@ -6444,9 +6579,8 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
                             ${d.address ? '<div class="addr">\u{1F4CD} ' + d.address + '</div>' : ''}
                             <div class="badge-count ${hasIssues ? 'danger' : ''}">${issues.length} 条记录</div>
                         ${isHouse && d.subStructures && d.subStructures.length > 0 ? `<div class="badge-count" style="background:#e8f0eb;color:#3a7a62;">🏗️ ${getSubStructuresByDevice(d.id).length}个附属构筑物</div>` : ''}
-                            <div style="display:flex;gap:0.3rem;margin-top:0.5rem;">
-                                <button class="view-btn" style="flex:1;" onclick="event.stopPropagation(); openDevice('${d.id}')">查看</button>
-                                <button class="view-btn" style="flex:1;background:#6b8a7d;color:#fff;border-color:#6b8a7d;" onclick="event.stopPropagation(); singleDeviceMoveUp('${d.id}')" title="上移一级">⬆ 上移</button>
+                            <div style="display:flex;justify-content:flex-end;">
+                                <button class="copy-btn" onclick="event.stopPropagation(); copyDeviceInfo('${d.name.replace(/'/g, "\\'")}','${(d.code || '').replace(/'/g, "\\'")}')" title="复制名称和台账号">📋</button>
                             </div>
                         </div>
                     `;
@@ -6482,6 +6616,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
 
         // 设置块内页面的事件处理
         setupStationPageEvents(block, stationId);
+        restoreScrollY();
     }
     window.openBlock = openBlock;
 
@@ -7334,6 +7469,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
 
     // ----- 设备详情 -----
     function openDevice(deviceId) {
+        saveScrollBeforeNav();
         currentDeviceId = deviceId;
         currentSubStructId = null;
         currentView = 'device';
@@ -7777,6 +7913,7 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
 
         // 异步加载所有缩略图到占位符
         fillLazyThumbs();
+        restoreScrollY();
     }
 
     // ----- 展开/收起模块（通用） -----
@@ -8090,7 +8227,13 @@ const ISSUE_LIBRARY = {"江油北":[{"d":"2026-01-05","l":"江油北站封闭围
         setupPhotoModalFileInput();
         setupRepairFileInput();
         loadViewMode();
+        try {
+            var saved = localStorage.getItem('gyfj_scrollMemory');
+            if (saved) scrollMemory = JSON.parse(saved) || {};
+        } catch(e) {}
+        isRestoring = true;
         restoreViewState();
+        isRestoring = false;
     });
 
     // ===== 问题库导入功能 =====
