@@ -4172,6 +4172,7 @@ function recalcDiseaseCounts(entityId) {
     let currentDeviceId = null;
     let currentStationName = null;
     let currentStationId = null;
+    let homeLineGroup = 'all';
 
     // ----- 首页 -----
     // ===== 手势返回 =====
@@ -4475,13 +4476,9 @@ function recalcDiseaseCounts(entityId) {
                 blockId: currentBlockId,
                 blockName: currentBlockName,
                 deviceId: currentDeviceId,
-                subStructId: currentSubStructId
+                subStructId: currentSubStructId,
+                lineGroup: homeLineGroup
             };
-            // 首页时保存当前选中的线别分组
-            if (currentView === 'home') {
-                var activeTab = document.querySelector('.tab-btn.active');
-                if (activeTab) state.lineGroup = activeTab.dataset.group;
-            }
             localStorage.setItem('gyfj_viewState', JSON.stringify(state));
         } catch(e) {}
     }
@@ -4518,19 +4515,8 @@ function recalcDiseaseCounts(entityId) {
                 if (st) { openStation(state.stationId, st.name); return true; }
             }
             // 都不行就回首页
+            if (state.lineGroup) homeLineGroup = state.lineGroup;
             goHome();
-            // 如果有线别分组记忆，切过去
-            if (state.lineGroup) {
-                setTimeout(function() {
-                    var tab = document.querySelector('.tab-btn[data-group="' + state.lineGroup + '"]');
-                    if (tab) {
-                        document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
-                        tab.classList.add('active');
-                        renderStationGrid(state.lineGroup);
-                        restoreScrollY();
-                    }
-                }, 50);
-            }
             return false;
         } catch(e) {
             goHome();
@@ -4579,6 +4565,7 @@ function recalcDiseaseCounts(entityId) {
                 if (dragState.dragging) return; // 拖拽中不触发点击
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 this.classList.add('active');
+                homeLineGroup = this.dataset.group;
                 renderStationGrid(this.dataset.group);
                 saveViewState();
                 document.getElementById('homeSearchInput').value = '';
@@ -4619,7 +4606,13 @@ function recalcDiseaseCounts(entityId) {
             if (!e.target.closest('#homeSearch')) suggestions.classList.remove('show');
         });
 
-        renderStationGrid('all');
+        renderStationGrid(homeLineGroup || 'all');
+        var activeTab = document.querySelector('.tab-btn[data-group="' + (homeLineGroup || 'all') + '"]');
+        if (activeTab) {
+            document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+            activeTab.classList.add('active');
+            activeTab.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
+        }
         restoreScrollY();
     }
 
